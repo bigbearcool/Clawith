@@ -20,7 +20,7 @@ from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = "add_identity_architecture"
-down_revision: Union[str, None] = "user_refactor_v1"
+down_revision: Union[str, None] = "add_sso_login_enabled"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

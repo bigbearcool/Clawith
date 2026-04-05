@@ -224,10 +224,10 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
-    """Login with username and password."""
+    """Login with username/email and password."""
     # Find Identity by username or email
     identity_result = await db.execute(
-        select(Identity).where((Identity.username == data.username) | (Identity.email == data.username))
+        select(Identity).where((Identity.username == data.login_identifier) | (Identity.email == data.login_identifier))
     )
     identity = identity_result.scalar_one_or_none()
 
