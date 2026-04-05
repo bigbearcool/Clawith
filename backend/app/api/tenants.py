@@ -24,9 +24,11 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 # ─── Schemas ────────────────────────────────────────────
 
+
 class TenantCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     target_tenant_id: uuid.UUID | None = None
+    slug: str | None = None
 
 class TenantOut(BaseModel):
     id: uuid.UUID
@@ -52,6 +54,7 @@ class TenantUpdate(BaseModel):
 
 
 # ─── Helpers ────────────────────────────────────────────
+
 
 def _slugify(name: str) -> str:
     """Generate a URL-friendly slug from a company name."""
@@ -89,20 +92,30 @@ async def self_create_company(
 
     # Check if self-creation is allowed
     from app.models.system_settings import SystemSetting
-    setting = await db.execute(
-        select(SystemSetting).where(SystemSetting.key == "allow_self_create_company")
-    )
+
+    setting = await db.execute(select(SystemSetting).where(SystemSetting.key == "allow_self_create_company"))
     s = setting.scalar_one_or_none()
     allowed = s.value.get("enabled", True) if s else True
     if not allowed and current_user.role != "platform_admin":
         raise HTTPException(status_code=403, detail="Company self-creation is currently disabled")
 
-    slug = _slugify(data.name)
+    if data.slug:
+        slug = re.sub(r"[^a-z0-9]+", "-", data.slug.lower().strip()).strip("-")[:40]
+        if not slug:
+            slug = "company"
+        slug = f"{slug}-{secrets.token_hex(3)}"
+    else:
+        slug = _slugify(data.name)
     tenant = Tenant(name=data.name, slug=slug, im_provider="web_only")
     db.add(tenant)
     await db.flush()
 
-    access_token = None
+access_token = None
+
+    from app.services.platform_service import platform_service
+    sso_base = await platform_service.get_tenant_sso_base_url(db, tenant)
+    tenant.sso_domain = sso_base
+    await db.flush()
 
     if current_user.tenant_id is not None:
         # Multi-tenant: user already belongs to a company.
@@ -155,6 +168,7 @@ async def self_create_company(
 
 # ─── Self-Service: Join Company via Invite Code ─────────
 
+
 class JoinRequest(BaseModel):
     invitation_code: str = Field(min_length=1, max_length=32)
     target_tenant_id: uuid.UUID | None = None
@@ -178,6 +192,7 @@ async def join_company(
     - Registration flow (user has no tenant yet): assigns tenant directly
     - Switch-org flow (user already has a tenant): creates a new User record"""
     from app.models.invitation_code import InvitationCode
+
     ic_result = await db.execute(
         select(InvitationCode).where(
             InvitationCode.code == data.invitation_code,
@@ -214,7 +229,9 @@ async def join_company(
 
     # Check if this company has an org_admin already
     admin_check = await db.execute(
-        select(sqla_func.count()).select_from(User).where(
+        select(sqla_func.count())
+        .select_from(User)
+        .where(
             User.tenant_id == tenant.id,
             User.role.in_(["org_admin", "platform_admin"]),
         )
@@ -284,19 +301,20 @@ async def join_company(
 
 # ─── Registration Config ───────────────────────────────
 
+
 @router.get("/registration-config")
 async def get_registration_config(db: AsyncSession = Depends(get_db)):
     """Public — returns whether self-creation of companies is allowed."""
     from app.models.system_settings import SystemSetting
-    result = await db.execute(
-        select(SystemSetting).where(SystemSetting.key == "allow_self_create_company")
-    )
+
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key == "allow_self_create_company"))
     s = result.scalar_one_or_none()
     allowed = s.value.get("enabled", True) if s else True
     return {"allow_self_create_company": allowed}
 
 
 # ─── Public: Resolve Tenant by Domain ───────────────────
+
 
 @router.get("/resolve-by-domain")
 async def resolve_tenant_by_domain(
@@ -338,13 +356,14 @@ async def resolve_tenant_by_domain(
     # 3. Fallback: extract slug from subdomain pattern
     if not tenant:
         import re
+
         m = re.match(r"^([a-z0-9][a-z0-9\-]*[a-z0-9])\.clawith\.ai$", domain.lower())
         if m:
             slug = m.group(1)
             result = await db.execute(select(Tenant).where(Tenant.slug == slug))
             tenant = result.scalar_one_or_none()
 
-    if not tenant or not tenant.is_active or not tenant.sso_enabled:
+if not tenant or not tenant.is_active or not tenant.sso_enabled:
         raise HTTPException(status_code=404, detail="Tenant not found or not active or SSO not enabled")
 
     return {
@@ -356,7 +375,9 @@ async def resolve_tenant_by_domain(
         "is_active": tenant.is_active,
     }
 
+
 # ─── Authenticated: List / Get ──────────────────────────
+
 
 @router.get("/", response_model=list[TenantOut])
 async def list_tenants(
@@ -402,7 +423,7 @@ async def update_tenant(
         raise HTTPException(status_code=404, detail="Tenant not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    
+
     # SSO configuration is managed exclusively by the company's own org_admin
     # via the Enterprise Settings page. Platform admins should not override it here.
     if current_user.role == "platform_admin":
