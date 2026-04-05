@@ -675,6 +675,7 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
         user_count = 0
         profile_count = 0
         sync_start = datetime.now()
+        all_users = []  # Initialize early to avoid UnboundLocalError in exception handler
 
         provider = await self._ensure_provider(db)
 
@@ -827,6 +828,18 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
 
             logger.error(f"[OrgSync] Critical error during sync: {e}\n{traceback.format_exc()}")
             errors.append(f"Critical: {str(e)}")
+
+        # Add permission warning if very few users synced
+        if len(all_users) < 5 and self.provider_type == "feishu":
+            permission_warning = (
+                "⚠️ 权限不足：只同步了 {} 个用户。请在飞书开放平台添加以下权限：\n"
+                "1. contact:user.base:readonly (获取用户基本信息)\n"
+                "2. contact:department.base:readonly (获取部门信息)\n"
+                "添加权限后重新发布版本并等待生效。"
+            ).format(len(all_users))
+            logger.warning(f"[OrgSync] {permission_warning}")
+            if not errors:
+                errors.append(permission_warning)
 
         return {
             "departments": dept_count,
