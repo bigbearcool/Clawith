@@ -10,8 +10,12 @@ import LinearCopyButton from '../components/LinearCopyButton';
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     const token = localStorage.getItem('token');
     const res = await fetch(`/api${url}`, {
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         ...options,
+        headers: { 
+            'Content-Type': 'application/json', 
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...options?.headers,
+        },
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
