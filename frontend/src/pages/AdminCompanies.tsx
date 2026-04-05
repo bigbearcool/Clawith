@@ -1199,6 +1199,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
     const [ssoEnabled, setSsoEnabled] = useState(!!company.sso_enabled);
     const [ssoDomain, setSsoDomain] = useState(company.sso_domain || '');
     const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
 
     const handleSave = async () => {
@@ -1214,8 +1215,12 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
             if (result.sso_domain) {
                 setSsoDomain(result.sso_domain);
             }
+            setSaved(true);
             onUpdated();
-            onClose();
+            // Close after showing saved state
+            setTimeout(() => {
+                onClose();
+            }, 1500);
         } catch (e: any) {
             setError(e.message || 'Failed to update');
         }
@@ -1308,13 +1313,26 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
                     </div>
                 </div>
 
+                {saved && (
+                    <div style={{ 
+                        color: 'var(--success)', 
+                        fontSize: '12px', 
+                        marginBottom: '16px', 
+                        textAlign: 'center',
+                        padding: '8px',
+                        background: 'rgba(34, 197, 94, 0.1)',
+                        borderRadius: '6px'
+                    }}>
+                        ✓ {t('admin.savedSuccess', 'Saved successfully')}
+                    </div>
+                )}
                 {error && <div style={{ color: 'var(--error)', fontSize: '12px', marginBottom: '16px', textAlign: 'center' }}>{error}</div>}
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose} disabled={saving}>
                         {t('common.cancel', 'Cancel')}
                     </button>
-                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>
+                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving || saved}>
                         {saving ? t('common.loading') : t('common.save', 'Save')}
                     </button>
                 </div>
