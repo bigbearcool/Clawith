@@ -321,7 +321,6 @@ class AutonomyService:
                             # Isolate error: log but don't fail the approval request
                             logger.error(f"[Autonomy] Feishu approval card failed (L3, agent={agent.id}): {e}")
                             # Don't raise - notification failure shouldn't break the approval process
-                        )
 
 
 autonomy_service = AutonomyService()
