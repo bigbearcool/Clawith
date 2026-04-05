@@ -1,7 +1,7 @@
 """Add Identity table and migrate to dual-identity architecture
 
 Revision ID: add_identity_architecture
-Revises: user_refactor_v1
+Revises: d9cbd43b62e5
 Create Date: 2026-04-05
 
 This migration:
@@ -20,7 +20,7 @@ from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = "add_identity_architecture"
-down_revision: Union[str, None] = "add_sso_login_enabled"
+down_revision: Union[str, None] = "d9cbd43b62e5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -143,18 +143,21 @@ async def create_company(
     """Create a new company and generate an admin invitation code (max_uses=1)."""
     import re
 
-    # Use custom slug if provided, otherwise generate from name
+    # Use custom slug if provided, otherwise generate from name with random suffix
     if data.slug:
         slug = re.sub(r"[^a-z0-9]+", "-", data.slug.lower().strip()).strip("-")[:40]
         if not slug:
             slug = "company"
+        # Check uniqueness and append suffix if needed
+        existing = await db.execute(select(Tenant).where(Tenant.slug == slug))
+        if existing.scalar_one_or_none():
+            slug = f"{slug}-{secrets.token_hex(3)}"
     else:
         slug = re.sub(r"[^a-z0-9]+", "-", data.name.lower().strip()).strip("-")[:40]
         if not slug:
             slug = "company"
-
-    # Ensure uniqueness by appending random suffix
-    slug = f"{slug}-{secrets.token_hex(3)}"
+        # Add random suffix for auto-generated slugs
+        slug = f"{slug}-{secrets.token_hex(3)}"
 
     tenant = Tenant(name=data.name, slug=slug, im_provider="web_only")
     db.add(tenant)
