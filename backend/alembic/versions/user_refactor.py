@@ -4,6 +4,7 @@ Revision ID: user_refactor_v1
 Revises: a1b2c3d4e5f6
 Create Date: 2026-03-27
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -11,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'user_refactor_v1'
-down_revision: Union[str, None] = 'a1b2c3d4e5f6'
+revision: str = "user_refactor_v1"
+down_revision: Union[str, None] = "a1b2c3d4e5f6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -56,7 +57,9 @@ def upgrade() -> None:
     # ============================================
     op.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sso_enabled BOOLEAN DEFAULT FALSE")
     op.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sso_domain VARCHAR(255)")
-    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_tenants_sso_domain ON tenants(sso_domain) WHERE sso_domain IS NOT NULL")
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_tenants_sso_domain ON tenants(sso_domain) WHERE sso_domain IS NOT NULL"
+    )
 
     # ============================================
     # 4. Alter org_departments (no foreign key - soft coupling via program)
@@ -106,12 +109,11 @@ def upgrade() -> None:
     op.execute("ALTER TABLE org_members ADD COLUMN IF NOT EXISTS unionid VARCHAR(100)")
     op.execute("ALTER TABLE org_members ADD COLUMN IF NOT EXISTS provider_id UUID")
     op.execute("ALTER TABLE org_members ADD COLUMN IF NOT EXISTS user_id UUID")
-    
+
     op.execute("CREATE INDEX IF NOT EXISTS ix_org_members_open_id ON org_members(open_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_org_members_external_id ON org_members(external_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_org_members_unionid ON org_members(unionid)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_org_members_user_id ON org_members(user_id)")
-
 
     # Note: provider_id and user_id are UUIDs without FK constraints - program should validate
 
@@ -141,13 +143,19 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_users_external_id ON users(external_id)")
 
     # Add unique constraints (partial indexes - allow multiple NULL values)
+    # Only create email index if email column exists in users table (Identity architecture compatibility)
     op.execute("""
         DO $$
         BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_indexes WHERE indexname = 'ix_users_tenant_email_unique'
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'email'
             ) THEN
-                CREATE UNIQUE INDEX ix_users_tenant_email_unique ON users(tenant_id, email) WHERE email IS NOT NULL;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_indexes WHERE indexname = 'ix_users_tenant_email_unique'
+                ) THEN
+                    CREATE UNIQUE INDEX ix_users_tenant_email_unique ON users(tenant_id, email) WHERE email IS NOT NULL;
+                END IF;
             END IF;
         END $$
     """)
@@ -210,7 +218,8 @@ def upgrade() -> None:
 
     # Step 1: Get distinct tenant_ids from org_departments that haven't been migrated
     connection = op.get_bind()
-    result = connection.execute(sa.text("""
+    result = connection.execute(
+        sa.text("""
         SELECT DISTINCT od.tenant_id
         FROM org_departments od
         WHERE od.tenant_id IS NOT NULL
@@ -218,7 +227,8 @@ def upgrade() -> None:
             SELECT 1 FROM identity_providers ip
             WHERE ip.tenant_id = od.tenant_id
         )
-    """))
+    """)
+    )
 
     tenant_ids = [row[0] for row in result.fetchall()]
 
@@ -232,16 +242,13 @@ def upgrade() -> None:
                 INSERT INTO identity_providers (id, provider_type, name, is_active, config, tenant_id, created_at, updated_at)
                 VALUES (:provider_id, 'feishu', 'Feishu SSO', TRUE, :config, :tenant_id, NOW(), NOW())
             """),
-            {
-                "provider_id": provider_id,
-                "config": '{"app_id": "", "app_secret": ""}',
-                "tenant_id": tenant_id
-            }
+            {"provider_id": provider_id, "config": '{"app_id": "", "app_secret": ""}', "tenant_id": tenant_id},
         )
 
     # Step 2: Update org_departments - map feishu_id to external_id and link to provider
     # Only update rows where external_id is NULL (hasn't been migrated)
-    connection.execute(sa.text("""
+    connection.execute(
+        sa.text("""
         DO $$
         BEGIN
             IF EXISTS (
@@ -259,7 +266,8 @@ def upgrade() -> None:
                   AND od.external_id IS NULL;
             END IF;
         END $$
-    """))
+    """)
+    )
 
     # Step 3: Drop feishu_id column after migration
     op.execute("ALTER TABLE org_departments DROP COLUMN IF EXISTS feishu_id")
@@ -269,6 +277,7 @@ def upgrade() -> None:
     op.execute("ALTER TABLE org_members DROP CONSTRAINT IF EXISTS fk_org_members_provider")
     # Add status column to org_departments for soft deletion during sync
     op.execute("ALTER TABLE org_departments ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'")
+
 
 def downgrade() -> None:
     # ============================================
@@ -289,16 +298,17 @@ def downgrade() -> None:
     # ============================================
     # 7. Recreate departments table
     # ============================================
-    op.create_table('departments',
-        sa.Column('id', sa.UUID(), nullable=False),
-        sa.Column('name', sa.VARCHAR(length=200), nullable=False),
-        sa.Column('parent_id', sa.UUID(), nullable=True),
-        sa.Column('manager_id', sa.UUID(), nullable=True),
-        sa.Column('sort_order', sa.INTEGER(), nullable=True),
-        sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(['parent_id'], ['departments.id'], name='departments_parent_id_fkey'),
-        sa.ForeignKeyConstraint(['manager_id'], ['users.id'], name='departments_manager_id_fkey'),
-        sa.PrimaryKeyConstraint('id', name='departments_pkey')
+    op.create_table(
+        "departments",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("name", sa.VARCHAR(length=200), nullable=False),
+        sa.Column("parent_id", sa.UUID(), nullable=True),
+        sa.Column("manager_id", sa.UUID(), nullable=True),
+        sa.Column("sort_order", sa.INTEGER(), nullable=True),
+        sa.Column("created_at", postgresql.TIMESTAMP(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(["parent_id"], ["departments.id"], name="departments_parent_id_fkey"),
+        sa.ForeignKeyConstraint(["manager_id"], ["users.id"], name="departments_manager_id_fkey"),
+        sa.PrimaryKeyConstraint("id", name="departments_pkey"),
     )
 
     # ============================================
@@ -346,12 +356,12 @@ def downgrade() -> None:
     # ============================================
     # 2. Drop sso_scan_sessions
     # ============================================
-    op.drop_table('sso_scan_sessions')
+    op.drop_table("sso_scan_sessions")
 
     # ============================================
     # 1. Drop identity_providers
     # ============================================
-    op.drop_table('identity_providers')
+    op.drop_table("identity_providers")
 
     # Note: Downgrade is NOT idempotent - it resets data
     # In production, you may want to skip this or make it optional
@@ -361,15 +371,19 @@ def downgrade() -> None:
     op.execute("ALTER TABLE org_departments ADD COLUMN IF NOT EXISTS feishu_id VARCHAR(100)")
 
     # Restore feishu_id from external_id
-    connection.execute(sa.text("""
+    connection.execute(
+        sa.text("""
         UPDATE org_departments
         SET feishu_id = external_id
         WHERE external_id IS NOT NULL
-    """))
+    """)
+    )
 
     # Delete the identity providers created by this migration
-    connection.execute(sa.text("""
+    connection.execute(
+        sa.text("""
         DELETE FROM identity_providers
         WHERE provider_type = 'feishu'
         AND config::text = '{"app_id": "", "app_secret": ""}'
-    """))
+    """)
+    )

@@ -203,6 +203,38 @@ class FeishuService:
         token = create_access_token(str(user.id), user.role)
         return user, token
 
+    @staticmethod
+    def _parse_api_response(
+        resp: httpx.Response,
+        *,
+        stage: str,
+        message_id: str | None = None,
+    ) -> dict:
+        """Parse Feishu API response and verify both HTTP status and business code."""
+        try:
+            data = resp.json()
+        except Exception as e:
+            logger.warning(
+                f"[Feishu] {stage} returned non-JSON response "
+                f"(http_status={resp.status_code}, message_id={message_id}): {e}"
+            )
+            raise RuntimeError(f"Feishu {stage} returned invalid JSON")
+
+        if resp.status_code >= 400:
+            logger.warning(
+                f"[Feishu] {stage} HTTP failure "
+                f"(http_status={resp.status_code}, message_id={message_id}, body={str(data)[:300]})"
+            )
+            raise RuntimeError(f"Feishu {stage} HTTP {resp.status_code}")
+
+        code = data.get("code")
+        msg = data.get("msg", "")
+        if code is not None and code != 0:
+            logger.warning(f"[Feishu] {stage} business failure (message_id={message_id}, code={code}, msg={msg})")
+            raise RuntimeError(f"Feishu {stage} failed: code={code}, msg={msg}")
+
+        return data
+
     async def send_message(
         self,
         app_id: str,
@@ -211,6 +243,7 @@ class FeishuService:
         msg_type: str,
         content: str,
         receive_id_type: str = "open_id",
+        stage: str = "send_message",
     ) -> dict:
         """Send a message via a specific Feishu bot (per-agent credentials).
 
@@ -221,6 +254,7 @@ class FeishuService:
             msg_type: "text", "interactive", etc.
             content: JSON string of message content
             receive_id_type: "open_id" or "chat_id"
+            stage: Stage identifier for logging
         """
         # Get app access token for this specific agent's bot
         async with httpx.AsyncClient() as client:
@@ -242,9 +276,12 @@ class FeishuService:
                 },
                 headers={"Authorization": f"Bearer {app_token}"},
             )
-            return resp.json()
+            data = self._parse_api_response(resp, stage=stage)
+            return data
 
-    async def patch_message(self, app_id: str, app_secret: str, message_id: str, content: str) -> dict:
+    async def patch_message(
+        self, app_id: str, app_secret: str, message_id: str, content: str, stage: str = "patch_message"
+    ) -> dict:
         """Patch an existing message (e.g. updating an interactive card for streaming)."""
         async with httpx.AsyncClient() as client:
             token_resp = await client.post(
@@ -263,7 +300,8 @@ class FeishuService:
                 },
                 headers={"Authorization": f"Bearer {app_token}"},
             )
-            return resp.json()
+            data = self._parse_api_response(resp, stage=stage, message_id=message_id)
+            return data
 
     async def resolve_open_id(
         self, app_id: str, app_secret: str, email: str | None = None, mobile: str | None = None
