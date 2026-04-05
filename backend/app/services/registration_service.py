@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.security import hash_password
-from app.models.identity import IdentityProvider
+from app.models.identity import IdentityProvider, Identity
 from app.models.tenant import Tenant
-from app.models.user import User, Identity
+from app.models.user import User
 from app.services.sso_service import sso_service
 from loguru import logger
 
@@ -74,21 +74,25 @@ class RegistrationService:
         if email:
             ident_result = await db.execute(select(Identity).where(Identity.email == email))
             if ident_result.scalar_one_or_none():
-                conflicts.append({
-                    "type": "email",
-                    "scope": "global",
-                    "message": "Email already registered",
-                })
-        
+                conflicts.append(
+                    {
+                        "type": "email",
+                        "scope": "global",
+                        "message": "Email already registered",
+                    }
+                )
+
         if mobile:
             normalized_mobile = re.sub(r"[\s\-\+]", "", mobile)
             ident_result = await db.execute(select(Identity).where(Identity.phone == normalized_mobile))
             if ident_result.scalar_one_or_none():
-                conflicts.append({
-                    "type": "mobile",
-                    "scope": "global",
-                    "message": "Mobile already registered",
-                })
+                conflicts.append(
+                    {
+                        "type": "mobile",
+                        "scope": "global",
+                        "message": "Mobile already registered",
+                    }
+                )
 
         return {
             "has_conflict": len(conflicts) > 0,
@@ -106,23 +110,23 @@ class RegistrationService:
     ) -> Identity:
         """Find an existing identity or create a new one."""
         identity = None
-        
+
         # Normalize empty strings to None to avoid unique constraint conflicts
         email = email or None
         phone = phone or None
         username = username or None
-        
+
         # Try to find by email
         if email:
             res = await db.execute(select(Identity).where(Identity.email == email))
             identity = res.scalar_one_or_none()
-            
+
         # Try to find by phone
         if not identity and phone:
             normalized_phone = re.sub(r"[\s\-\+]", "", phone)
             res = await db.execute(select(Identity).where(Identity.phone == normalized_phone))
             identity = res.scalar_one_or_none()
-            
+
         # Try to find by username
         if not identity and username:
             res = await db.execute(select(Identity).where(Identity.username == username))
@@ -131,15 +135,17 @@ class RegistrationService:
         if identity:
             # Auto-verify if SMTP is not configured anywhere (env or DB)
             from app.services.system_email_service import resolve_email_config_async
+
             email_config = await resolve_email_config_async(db)
             if not email_config:
                 if not identity.email_verified:
                     identity.email_verified = True
                     db.add(identity)
             return identity
-        
+
         # Check if SMTP is configured anywhere (env or DB) for auto-verification
         from app.services.system_email_service import resolve_email_config_async
+
         email_config = await resolve_email_config_async(db)
         is_verified = not email_config  # Auto-verify only if no SMTP configured anywhere
 
@@ -148,7 +154,6 @@ class RegistrationService:
         identity = Identity(
             email=email,
             phone=normalized_phone,
-
             username=username,
             password_hash=hash_password(password) if password else None,
             is_platform_admin=is_platform_admin,
@@ -186,6 +191,7 @@ class RegistrationService:
 
         # Check if SMTP is configured anywhere (env or DB) for auto-activation
         from app.services.system_email_service import resolve_email_config_async
+
         email_config = await resolve_email_config_async(db)
         is_active = identity.email_verified
         if not email_config:
@@ -209,12 +215,15 @@ class RegistrationService:
 
         # Create Participant record
         from app.models.participant import Participant
-        db.add(Participant(
-            type="user",
-            ref_id=user.id,
-            display_name=user.display_name,
-            avatar_url=user.avatar_url,
-        ))
+
+        db.add(
+            Participant(
+                type="user",
+                ref_id=user.id,
+                display_name=user.display_name,
+                avatar_url=user.avatar_url,
+            )
+        )
 
         await db.flush()
         return user
@@ -282,9 +291,8 @@ class RegistrationService:
             email=email,
             phone=user_info.get("mobile") or user_info.get("phone"),
             username=username,
-            password=effective_id, # Placeholder for SSO users
+            password=effective_id,  # Placeholder for SSO users
         )
-
 
         # Step 3: Create User linked to Identity
         user = await self.create_user_with_identity(
@@ -294,7 +302,6 @@ class RegistrationService:
             registration_source=provider_type,
             tenant_id=tenant_id,
         )
-
 
         return user, True
 
@@ -325,6 +332,7 @@ class RegistrationService:
 
             # Get user info
             from app.services.auth_provider import ExternalUserInfo
+
             user_info_obj = await auth_provider.get_user_info(access_token)
 
             # Convert to dict
@@ -400,6 +408,7 @@ class RegistrationService:
         # First check invitation code
         if invitation_code:
             from app.models.invitation_code import InvitationCode
+
             result = await db.execute(
                 select(InvitationCode).where(
                     InvitationCode.code == invitation_code,
@@ -427,7 +436,7 @@ class RegistrationService:
 
     async def bind_org_member(self, db: AsyncSession, user: User) -> None:
         """Find and bind OrgMember to User based on email/phone and tenant_id.
-        
+
         This establishes the link between a platform user and their entry in the
         synchronized organizational structure.
         """
@@ -435,16 +444,14 @@ class RegistrationService:
             return
 
         from app.models.org import OrgMember
-        
+
         member = None
 
         # Prefer email match
         if user.email:
             result = await db.execute(
                 select(OrgMember).where(
-                    OrgMember.email == user.email,
-                    OrgMember.tenant_id == user.tenant_id,
-                    OrgMember.user_id == None
+                    OrgMember.email == user.email, OrgMember.tenant_id == user.tenant_id, OrgMember.user_id == None
                 )
             )
             member = result.scalar_one_or_none()
@@ -455,14 +462,14 @@ class RegistrationService:
                 select(OrgMember).where(
                     OrgMember.phone == user.primary_mobile,
                     OrgMember.tenant_id == user.tenant_id,
-                    OrgMember.user_id == None
+                    OrgMember.user_id == None,
                 )
             )
             member = result.scalar_one_or_none()
-        
+
         if member:
             member.user_id = user.id
-            
+
             # Sync email/phone both ways (prefer user if provided)
             if user.email and member.email != user.email:
                 member.email = user.email
@@ -473,7 +480,7 @@ class RegistrationService:
                 member.phone = user.primary_mobile
             elif not user.primary_mobile and member.phone:
                 user.primary_mobile = member.phone
-            
+
             await db.flush()
 
     async def sync_org_member_contact_from_user(
