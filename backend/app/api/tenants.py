@@ -30,6 +30,7 @@ class TenantCreate(BaseModel):
     target_tenant_id: uuid.UUID | None = None
     slug: str | None = None
 
+
 class TenantOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -70,6 +71,7 @@ def _slugify(name: str) -> str:
 
 class SelfCreateResponse(BaseModel):
     """Response for self-create company, includes token for context switching."""
+
     tenant: TenantOut
     access_token: str | None = None  # Non-null when a new User record was created (multi-tenant switch)
 
@@ -88,7 +90,10 @@ async def self_create_company(
     """
     # Block self-creation if locked to a specific tenant (Dedicated Link flow)
     if data.target_tenant_id is not None:
-        raise HTTPException(status_code=403, detail="Company creation is not allowed via this link. Please join your assigned organization.")
+        raise HTTPException(
+            status_code=403,
+            detail="Company creation is not allowed via this link. Please join your assigned organization.",
+        )
 
     # Check if self-creation is allowed
     from app.models.system_settings import SystemSetting
@@ -110,9 +115,10 @@ async def self_create_company(
     db.add(tenant)
     await db.flush()
 
-access_token = None
+    access_token = None
 
     from app.services.platform_service import platform_service
+
     sso_base = await platform_service.get_tenant_sso_base_url(db, tenant)
     tenant.sso_domain = sso_base
     await db.flush()
@@ -139,12 +145,14 @@ access_token = None
         await db.flush()
 
         # Create Participant for the new user record
-        db.add(Participant(
-            type="user",
-            ref_id=new_user.id,
-            display_name=new_user.display_name,
-            avatar_url=new_user.avatar_url,
-        ))
+        db.add(
+            Participant(
+                type="user",
+                ref_id=new_user.id,
+                display_name=new_user.display_name,
+                avatar_url=new_user.avatar_url,
+            )
+        )
         await db.flush()
 
         # Generate token scoped to the new user so frontend can switch context
@@ -206,7 +214,9 @@ async def join_company(
 
     # Verify matching tenant if locked (Dedicated Link flow)
     if data.target_tenant_id and str(code_obj.tenant_id) != str(data.target_tenant_id):
-        raise HTTPException(status_code=403, detail="This invitation code does not belong to the required organization.")
+        raise HTTPException(
+            status_code=403, detail="This invitation code does not belong to the required organization."
+        )
 
     if code_obj.used_count >= code_obj.max_uses:
         raise HTTPException(status_code=400, detail="Invitation code has reached its usage limit")
@@ -265,12 +275,14 @@ async def join_company(
         await db.flush()
 
         # Create Participant for the new user record
-        db.add(Participant(
-            type="user",
-            ref_id=new_user.id,
-            display_name=new_user.display_name,
-            avatar_url=new_user.avatar_url,
-        ))
+        db.add(
+            Participant(
+                type="user",
+                ref_id=new_user.id,
+                display_name=new_user.display_name,
+                avatar_url=new_user.avatar_url,
+            )
+        )
         await db.flush()
 
         # Generate token scoped to the new user so frontend can switch context
@@ -335,9 +347,7 @@ async def resolve_tenant_by_domain(
     # 1. Match by stripping protocol from stored sso_domain
     # sso_domain = "https://acme.clawith.ai" → compare against "acme.clawith.ai"
     for proto in ("https://", "http://"):
-        result = await db.execute(
-            select(Tenant).where(Tenant.sso_domain == f"{proto}{domain}")
-        )
+        result = await db.execute(select(Tenant).where(Tenant.sso_domain == f"{proto}{domain}"))
         tenant = result.scalar_one_or_none()
         if tenant:
             break
@@ -346,9 +356,7 @@ async def resolve_tenant_by_domain(
     if not tenant and ":" in domain:
         domain_no_port = domain.split(":")[0]
         for proto in ("https://", "http://"):
-            result = await db.execute(
-                select(Tenant).where(Tenant.sso_domain.like(f"{proto}{domain_no_port}%"))
-            )
+            result = await db.execute(select(Tenant).where(Tenant.sso_domain.like(f"{proto}{domain_no_port}%")))
             tenant = result.scalar_one_or_none()
             if tenant:
                 break
@@ -363,17 +371,17 @@ async def resolve_tenant_by_domain(
             result = await db.execute(select(Tenant).where(Tenant.slug == slug))
             tenant = result.scalar_one_or_none()
 
-if not tenant or not tenant.is_active or not tenant.sso_enabled:
-        raise HTTPException(status_code=404, detail="Tenant not found or not active or SSO not enabled")
+        if not tenant or not tenant.is_active or not tenant.sso_enabled:
+            raise HTTPException(status_code=404, detail="Tenant not found or not active or SSO not enabled")
 
-    return {
-        "id": tenant.id,
-        "name": tenant.name,
-        "slug": tenant.slug,
-        "sso_enabled": tenant.sso_enabled,
-        "sso_domain": tenant.sso_domain,
-        "is_active": tenant.is_active,
-    }
+        return {
+            "id": tenant.id,
+            "name": tenant.name,
+            "slug": tenant.slug,
+            "sso_enabled": tenant.sso_enabled,
+            "sso_domain": tenant.sso_domain,
+            "is_active": tenant.is_active,
+        }
 
 
 # ─── Authenticated: List / Get ──────────────────────────
