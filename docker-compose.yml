@@ -66,8 +66,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
   frontend:
-frontend:
     build:
       context: ./frontend
       args:
