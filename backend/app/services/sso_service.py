@@ -300,6 +300,48 @@ class SSOService:
         """
         self.DOMAIN_TENANT_HINTS[domain.lower()] = tenant_id
 
+    async def validate_sso_enablement(self, db: AsyncSession, tenant_id: uuid.UUID) -> bool:
+        """Check if SSO can be enabled for this tenant under IP restrictions.
+
+        Only checks when THIS tenant doesn't have SSO enabled yet.
+        If tenant already has sso_enabled=True, allows without checking.
+
+        Returns True if allowed, False if another tenant already has SSO enabled on an IP base.
+        """
+        from app.services.platform_service import platform_service
+
+        # First check if this tenant already has SSO enabled
+        tenant_result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant and tenant.sso_enabled:
+            # Already has SSO enabled, can freely toggle providers
+            return True
+
+        # This tenant doesn't have SSO enabled yet, check IP restriction
+        base_url = await platform_service.get_public_base_url(db)
+
+        # Parse host
+        parts = base_url.split("://")
+        if len(parts) < 2:
+            return True  # Can't determine, allow
+
+        host = parts[1].split(":")[0].split("/")[0]
+
+        # If not an IP address, always allow (domain mode supports multi-tenant SSO)
+        if not platform_service.is_ip_address(host):
+            return True
+
+        # IP mode: check if another tenant already has SSO enabled
+        result = await db.execute(select(Tenant).where(Tenant.sso_enabled == True, Tenant.id != tenant_id))
+        other_sso_tenant = result.scalar_one_or_none()
+
+        if other_sso_tenant:
+            # Another tenant already has SSO on this IP
+            return False
+
+        # No other tenant has SSO, this one can enable it
+        return True
+
 
 # Global SSO service instance
 sso_service = SSOService()

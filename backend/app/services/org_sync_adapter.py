@@ -280,8 +280,6 @@ class BaseOrgSyncAdapter(ABC):
         update_mappings = [{"id": d_id, "member_count": d_data["total"]} for d_id, d_data in dept_map.items()]
 
         if update_mappings:
-            from app.database import async_engine
-
             # Use core update with executemany approach handled cleanly by SQLAlchemy mapping
             # SQLAlchemy 2.0 style bulk update
             from sqlalchemy import bindparam
