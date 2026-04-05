@@ -19,26 +19,26 @@ class PlatformService:
         ip_pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
         return bool(ip_pattern.match(h))
 
-    async def get_public_base_url(self, db: AsyncSession | None = None, request: Request | None = None) -> str:
+async def get_public_base_url(self, db: AsyncSession | None = None, request: Request | None = None) -> str:
         """Resolve the platform's public base URL with priority lookup.
-
+        
         Priority:
-        1. Environment variable (PUBLIC_BASE_URL) - from .env or docker
-        2. Database system_settings.platform.public_base_url
+        1. Database system_settings.platform.public_base_url (highest - UI setting)
+        2. Environment variable (PUBLIC_BASE_URL) - from .env or docker
         3. Incoming request's base URL (browser address)
         4. Hardcoded fallback (https://try.clawith.ai)
         """
-        # 1. Try environment variable
-        env_url = os.environ.get("PUBLIC_BASE_URL")
-        if env_url:
-            return env_url.rstrip("/")
-
-        # 2. Try database
+        # 1. Try database first (UI setting takes priority)
         if db:
             result = await db.execute(select(SystemSetting).where(SystemSetting.key == "platform"))
             setting = result.scalar_one_or_none()
             if setting and setting.value and setting.value.get("public_base_url"):
                 return setting.value["public_base_url"].rstrip("/")
+
+        # 2. Try environment variable
+        env_url = os.environ.get("PUBLIC_BASE_URL")
+        if env_url:
+            return env_url.rstrip("/")
 
         # 3. Fallback to request (browser address)
         if request:

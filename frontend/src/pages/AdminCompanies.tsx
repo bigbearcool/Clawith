@@ -451,7 +451,7 @@ function PlatformTab({ onPlatformUrlSaved }: { onPlatformUrlSaved?: () => void }
                     {platformUrlSaved && <span style={{ color: 'var(--success)', fontSize: '12px' }}>{t('enterprise.config.saved', 'Saved')}</span>}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px' }}>
-                    {t('admin.platformUrl.note', 'Priority: Environment variable PUBLIC_BASE_URL > This setting > Auto-detect from request. SSO domains will be generated as: {slug}.{domain}') }
+                    {t('admin.platformUrl.note', 'Priority: This setting (highest) > Environment variable PUBLIC_BASE_URL > Auto-detect from request. SSO domains will be generated as: {slug}.{domain}') }
                 </div>
             </div>
 
