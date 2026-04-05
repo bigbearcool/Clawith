@@ -50,7 +50,8 @@ export default function AdminCompanies() {
     const { t } = useTranslation();
     const user = useAuthStore((s) => s.user);
     const [activeTab, setActiveTab] = useState<'dashboard' | 'platform' | 'companies'>('dashboard');
-
+    const [refreshKey, setRefreshKey] = useState(0);
+    
     // Guard: only platform_admin
     if (user?.role !== 'platform_admin') {
         return (
@@ -91,8 +92,8 @@ export default function AdminCompanies() {
 
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 {activeTab === 'dashboard' && <PlatformDashboard />}
-                {activeTab === 'platform' && <PlatformTab />}
-                {activeTab === 'companies' && <CompaniesTab />}
+                {activeTab === 'platform' && <PlatformTab onPlatformUrlSaved={() => { setRefreshKey(k => k + 1); setActiveTab('companies'); }} />}
+                {activeTab === 'companies' && <CompaniesTab refreshKey={refreshKey} />}
             </div>
         </div>
     );
@@ -100,7 +101,7 @@ export default function AdminCompanies() {
 
 
 // ─── Platform Tab ──────────────────────────────────
-function PlatformTab() {
+function PlatformTab({ onPlatformUrlSaved }: { onPlatformUrlSaved?: () => void }) {
     const { t } = useTranslation();
 
     // Platform settings toggles
@@ -246,7 +247,11 @@ function PlatformTab() {
             });
             setPlatformUrlSaved(true);
             setTimeout(() => setPlatformUrlSaved(false), 2000);
-            showToast(t('admin.platformUrl.saved', 'Platform URL saved. SSO domains will be regenerated for tenants with SSO enabled.'), 'success');
+            showToast(t('admin.platformUrl.saved', 'Platform URL saved. SSO domains regenerated.'), 'success');
+            // Trigger refresh and switch to companies tab
+            if (onPlatformUrlSaved) {
+                setTimeout(() => onPlatformUrlSaved(), 1000);
+            }
         } catch (e: any) {
             showToast(e.message || 'Failed to save', 'error');
         }
@@ -708,7 +713,7 @@ function PlatformTab() {
 
 
 // ─── Companies Tab ─────────────────────────────────
-function CompaniesTab() {
+function CompaniesTab({ refreshKey }: { refreshKey?: number }) {
     const { t } = useTranslation();
     const [companies, setCompanies] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -767,7 +772,7 @@ function CompaniesTab() {
 
     useEffect(() => {
         loadCompanies();
-    }, []);
+    }, [refreshKey]);
 
     // Sorting logic
     const handleSort = (key: SortKey) => {
