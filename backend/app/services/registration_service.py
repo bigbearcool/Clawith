@@ -107,6 +107,11 @@ class RegistrationService:
         """Find an existing identity or create a new one."""
         identity = None
         
+        # Normalize empty strings to None to avoid unique constraint conflicts
+        email = email or None
+        phone = phone or None
+        username = username or None
+        
         # Try to find by email
         if email:
             res = await db.execute(select(Identity).where(Identity.email == email))

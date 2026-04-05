@@ -674,6 +674,33 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
             all_users = await self._fetch_all_users()
             logger.info(f"Feishu fetched {len(all_users)} total users globally.")
 
+            # Ensure all departments referenced by users exist in DB.
+            # When fetch_departments() returns 40004 (no dept authority), we still get
+            # valid department_ids[] from each user's record, so we can auto-create
+            # department stubs from those IDs rather than leaving members orphaned.
+            seen_dept_ids: set[str] = {d.external_id for d in departments}
+            for user in all_users:
+                for did in (user.department_ids or []):
+                    if did and did != "0" and did not in seen_dept_ids:
+                        try:
+                            async with db.begin_nested():
+                                await self._upsert_department(
+                                    db,
+                                    provider,
+                                    ExternalDepartment(
+                                        external_id=did,
+                                        name=f"部门-{did}",
+                                        parent_external_id=None,
+                                        member_count=0,
+                                        raw_data={"department_id": did, "name": f"部门-{did}"},
+                                    ),
+                                )
+                            dept_count += 1
+                            seen_dept_ids.add(did)
+                            logger.info(f"[OrgSync] Auto-created department stub: {did}")
+                        except Exception as e:
+                            logger.error(f"[OrgSync] Failed to auto-create department {did}: {e}")
+
             for user in all_users:
                 try:
                     async with db.begin_nested():
