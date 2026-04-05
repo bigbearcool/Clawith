@@ -19,9 +19,9 @@ class PlatformService:
         ip_pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
         return bool(ip_pattern.match(h))
 
-async def get_public_base_url(self, db: AsyncSession | None = None, request: Request | None = None) -> str:
+    async def get_public_base_url(self, db: AsyncSession | None = None, request: Request | None = None) -> str:
         """Resolve the platform's public base URL with priority lookup.
-        
+
         Priority:
         1. Database system_settings.platform.public_base_url (highest - UI setting)
         2. Environment variable (PUBLIC_BASE_URL) - from .env or docker
@@ -53,7 +53,7 @@ async def get_public_base_url(self, db: AsyncSession | None = None, request: Req
 
         Priority:
         1. Explicit sso_domain stored in tenant record (if present)
-        2. Auto-generated URL based on the unified public_base_url (ENV > Request > Fallback)
+        2. Auto-generated URL based on the unified public_base_url (DB > ENV > Request > Fallback)
         """
         if tenant.sso_domain:
             return tenant.sso_domain.rstrip("/")
