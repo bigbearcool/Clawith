@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.security import hash_password
-from app.models.identity import IdentityProvider, Identity
+from app.models.identity import IdentityProvider
 from app.models.tenant import Tenant
-from app.models.user import User
+from app.models.user import User, Identity
 from app.services.sso_service import sso_service
 from loguru import logger
 

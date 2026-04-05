@@ -1,4 +1,9 @@
-"""User and organization models."""
+"""User and organization models.
+
+Dual-identity architecture:
+- Identity: Global identity (natural person) across all tenants
+- User: Tenant member (role and profile within a specific company)
+"""
 
 import uuid
 from datetime import datetime
@@ -12,7 +17,6 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from app.database import Base
 
 
-
 class Identity(Base):
     """
     Physical Identity (Lark ID).
@@ -22,25 +26,23 @@ class Identity(Base):
     __tablename__ = "identities"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
+
     # Global unique identifiers for login
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(50), unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(100), unique=True, index=True)
-    
+
     # Global authentication
     password_hash: Mapped[str | None] = mapped_column(String(255))
-    
+
     # Global status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False)
-    
+
     # Verification status
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -60,7 +62,7 @@ class User(Base):
     # are handled via partial unique indexes in migration to allow NULL values
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
+
     # Link to global identity
     identity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("identities.id"), index=True)
 
@@ -81,9 +83,10 @@ class User(Base):
 
     registration_source: Mapped[str | None] = mapped_column(String(50), default="web")
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    # Generic platform-stable identity IDs
+    external_id: Mapped[str | None] = mapped_column(String(255), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
