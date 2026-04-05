@@ -187,6 +187,8 @@ async def create_company(
             name=tenant.name,
             slug=tenant.slug,
             is_active=tenant.is_active,
+            sso_enabled=tenant.sso_enabled,
+            sso_domain=tenant.sso_domain,
             created_at=tenant.created_at,
         ),
         admin_invitation_code=code_str,
@@ -241,6 +243,8 @@ async def update_company(
         if slug and slug != tenant.slug:
             tenant.slug = slug
             slug_changed = True
+            # Flush to ensure the tenant object is updated
+            await db.flush()
     if data.sso_enabled is not None:
         tenant.sso_enabled = data.sso_enabled
     if data.sso_domain is not None:
@@ -250,6 +254,8 @@ async def update_company(
     if slug_changed:
         from app.services.platform_service import platform_service
 
+        # Clear existing sso_domain to force regeneration
+        tenant.sso_domain = None
         sso_domain = await platform_service.get_tenant_sso_base_url(db, tenant)
         tenant.sso_domain = sso_domain
 
