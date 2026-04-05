@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.identity import IdentityProvider
 from app.models.org import OrgDepartment, OrgMember
+from app.models.tenant import Tenant
 from app.models.user import User, Identity
 from pypinyin import pinyin, Style
 
@@ -280,19 +281,13 @@ class BaseOrgSyncAdapter(ABC):
         update_mappings = [{"id": d_id, "member_count": d_data["total"]} for d_id, d_data in dept_map.items()]
 
         if update_mappings:
-            # Use core update with executemany approach handled cleanly by SQLAlchemy mapping
-            # SQLAlchemy 2.0 style bulk update
-            from sqlalchemy import bindparam
-
-            stmt = (
-                update(OrgDepartment)
-                .where(OrgDepartment.id == bindparam("b_id"))
-                .values(member_count=bindparam("b_count"))
-                .execution_options(synchronize_session=False)
-            )
-            # Re-map keys for bindparams
-            bind_mappings = [{"b_id": m["id"], "b_count": m["member_count"]} for m in update_mappings]
-            await db.execute(stmt, bind_mappings)
+            for mapping in update_mappings:
+                await db.execute(
+                    update(OrgDepartment)
+                    .where(OrgDepartment.id == mapping["id"])
+                    .values(member_count=mapping["member_count"])
+                    .execution_options(synchronize_session=False)
+                )
 
     async def _ensure_provider(self, db: AsyncSession) -> IdentityProvider:
         """Ensure IdentityProvider record exists."""
@@ -724,6 +719,7 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                             logger.error(f"[OrgSync] Failed to auto-create department {did}: {e}")
 
             for user in all_users:
+                logger.info(f"[OrgSync] Processing user: {user.external_id} - {user.name}")
                 try:
                     async with db.begin_nested():
                         # Use first department from user's department_ids, fallback to "0"
@@ -804,6 +800,7 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                             departments.append(dept)
 
                         stats = await self._upsert_member(db, provider, user, dept_ext_id)
+                        logger.info(f"[OrgSync] Upserted member: {user.external_id} - {user.name}, stats: {stats}")
                         if stats.get("user_created"):
                             user_count += 1
                         if stats.get("profile_synced"):
@@ -875,6 +872,10 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 data = resp.json()
+
+                # Debug: log full response for first page
+                if page_num == 0:
+                    logger.info(f"[Feishu] Full API response: {data}")
 
                 if data.get("code") != 0:
                     logger.error(f"Feishu fetch all users error: {data}")

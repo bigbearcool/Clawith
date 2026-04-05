@@ -339,13 +339,14 @@ async def resolve_tenant_by_domain(
     The incoming `domain` parameter is the host (without protocol).
 
     Lookup precedence:
-    1. Exact match on tenant.sso_domain ending with the host (strips protocol)
-    2. Extract slug from "{slug}.clawith.ai" and match tenant.slug
+    1. Exact match on tenant.sso_domain
+    2. Match ignoring port
+    3. Extract first subdomain part as slug and match tenant.slug
     """
     tenant = None
+    import re
 
-    # 1. Match by stripping protocol from stored sso_domain
-    # sso_domain = "https://acme.clawith.ai" → compare against "acme.clawith.ai"
+    # 1. Exact match with protocol
     for proto in ("https://", "http://"):
         result = await db.execute(select(Tenant).where(Tenant.sso_domain == f"{proto}{domain}"))
         tenant = result.scalar_one_or_none()
@@ -361,27 +362,29 @@ async def resolve_tenant_by_domain(
             if tenant:
                 break
 
-    # 3. Fallback: extract slug from subdomain pattern
+    # 3. Fallback: extract slug from first subdomain part (supports any domain pattern)
+    # e.g. "1111.bigbear.cool:3008" → slug = "1111"
     if not tenant:
-        import re
+        domain_lower = domain.lower()
+        domain_no_port = domain_lower.split(":")[0]
+        parts = domain_no_port.split(".")
+        if len(parts) >= 2:
+            potential_slug = parts[0]
+            if re.match(r"^([a-z0-9][a-z0-9\-]*[a-z0-9])$", potential_slug):
+                result = await db.execute(select(Tenant).where(Tenant.slug == potential_slug))
+                tenant = result.scalar_one_or_none()
 
-        m = re.match(r"^([a-z0-9][a-z0-9\-]*[a-z0-9])\.clawith\.ai$", domain.lower())
-        if m:
-            slug = m.group(1)
-            result = await db.execute(select(Tenant).where(Tenant.slug == slug))
-            tenant = result.scalar_one_or_none()
+    if not tenant or not tenant.is_active or not tenant.sso_enabled:
+        raise HTTPException(status_code=404, detail="Tenant not found or not active or SSO not enabled")
 
-        if not tenant or not tenant.is_active or not tenant.sso_enabled:
-            raise HTTPException(status_code=404, detail="Tenant not found or not active or SSO not enabled")
-
-        return {
-            "id": tenant.id,
-            "name": tenant.name,
-            "slug": tenant.slug,
-            "sso_enabled": tenant.sso_enabled,
-            "sso_domain": tenant.sso_domain,
-            "is_active": tenant.is_active,
-        }
+    return {
+        "id": tenant.id,
+        "name": tenant.name,
+        "slug": tenant.slug,
+        "sso_enabled": tenant.sso_enabled,
+        "sso_domain": tenant.sso_domain,
+        "is_active": tenant.is_active,
+    }
 
 
 # ─── Authenticated: List / Get ──────────────────────────
