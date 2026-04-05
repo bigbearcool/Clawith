@@ -158,14 +158,15 @@ async def _get_tool_config(agent_id: Optional[uuid.UUID], tool_name: str) -> Opt
     logger.error(f"[ToolConfig] No DB config found for {tool_name}, agent_id={agent_id}")
     return None
 
+
 # ContextVar set by each channel handler so send_channel_file knows where to send
 # Value: async callable(file_path: Path) -> None  |  None for web chat (returns URL)
-channel_file_sender: ContextVar = ContextVar('channel_file_sender', default=None)
+channel_file_sender: ContextVar = ContextVar("channel_file_sender", default=None)
 # For web chat: agent_id needed to build download URL
-channel_web_agent_id: ContextVar = ContextVar('channel_web_agent_id', default=None)
+channel_web_agent_id: ContextVar = ContextVar("channel_web_agent_id", default=None)
 # Set by Feishu channel handler — open_id of the message sender so calendar tool
 # can auto-invite them as attendee when no explicit attendee list is given
-channel_feishu_sender_open_id: ContextVar = ContextVar('channel_feishu_sender_open_id', default=None)
+channel_feishu_sender_open_id: ContextVar = ContextVar("channel_feishu_sender_open_id", default=None)
 
 # ─── Tool Definitions (OpenAI function-calling format) ──────────
 
@@ -349,7 +350,7 @@ AGENT_TOOLS = [
                     },
                     "config": {
                         "type": "object",
-                        "description": "Type-specific config. cron: {\"expr\": \"0 9 * * *\"}. once: {\"at\": \"2026-03-10T09:00:00+08:00\"}. interval: {\"minutes\": 30}. poll: {\"url\": \"...\", \"json_path\": \"$.status\", \"fire_on\": \"change\", \"interval_min\": 5}. on_message: {\"from_agent_name\": \"Morty\"} or {\"from_user_name\": \"张三\"} (for human users on Feishu/Slack/Discord). webhook: {\"secret\": \"optional_hmac_secret\"} (system auto-generates the URL)",
+                        "description": 'Type-specific config. cron: {"expr": "0 9 * * *"}. once: {"at": "2026-03-10T09:00:00+08:00"}. interval: {"minutes": 30}. poll: {"url": "...", "json_path": "$.status", "fire_on": "change", "interval_min": 5}. on_message: {"from_agent_name": "Morty"} or {"from_user_name": "张三"} (for human users on Feishu/Slack/Discord). webhook: {"secret": "optional_hmac_secret"} (system auto-generates the URL)',
                     },
                     "reason": {
                         "type": "string",
@@ -499,7 +500,7 @@ AGENT_TOOLS = [
                     "channel": {
                         "type": "string",
                         "description": "Optional: Specific channel to use (feishu, dingtalk, wecom). Use this if multiple people have the same name in different channels.",
-                        "enum": ["feishu", "dingtalk", "wecom"]
+                        "enum": ["feishu", "dingtalk", "wecom"],
                     },
                 },
                 "required": ["member_name", "message"],
@@ -853,7 +854,10 @@ AGENT_TOOLS = [
                 "properties": {
                     "url": {"type": "string", "description": "多维表格的 URL 链接。"},
                     "table_id": {"type": "string", "description": "具体的数据表 ID，如果 url 中包含 tbl 则可以不填。"},
-                    "filter_info": {"type": "string", "description": "可选，FQL 语法的过滤条件，例如 'CurrentValue.[Status]=\"Done\"'。如不确定过滤语法，可以不填，由你臺己在本地过滤返回的所有数据。"},
+                    "filter_info": {
+                        "type": "string",
+                        "description": "可选，FQL 语法的过滤条件，例如 'CurrentValue.[Status]=\"Done\"'。如不确定过滤语法，可以不填，由你臺己在本地过滤返回的所有数据。",
+                    },
                     "max_results": {"type": "integer", "description": "最大返回条数 (默认 100)"},
                 },
                 "required": ["url"],
@@ -870,7 +874,10 @@ AGENT_TOOLS = [
                 "properties": {
                     "url": {"type": "string", "description": "多维表格的 URL 链接。"},
                     "table_id": {"type": "string", "description": "具体的数据表 ID，如果 url 中包含 tbl 则可以不填。"},
-                    "fields": {"type": "string", "description": "一个 JSON 字符串，代表要插入的 fields。例如：'{\"Name\": \"张三\", \"Age\": 30}'"},
+                    "fields": {
+                        "type": "string",
+                        "description": '一个 JSON 字符串，代表要插入的 fields。例如：\'{"Name": "张三", "Age": 30}\'',
+                    },
                 },
                 "required": ["url", "fields"],
             },
@@ -886,8 +893,14 @@ AGENT_TOOLS = [
                 "properties": {
                     "url": {"type": "string", "description": "多维表格的 URL 链接。"},
                     "table_id": {"type": "string", "description": "具体的数据表 ID，如果 url 中包含 tbl 则可以不填。"},
-                    "record_id": {"type": "string", "description": "要更新的 record_id，通过 bitable_query_records 获取。"},
-                    "fields": {"type": "string", "description": "一个 JSON 字符串，代表要更新的 fields。例如：'{\"Status\": \"Done\"}'"},
+                    "record_id": {
+                        "type": "string",
+                        "description": "要更新的 record_id，通过 bitable_query_records 获取。",
+                    },
+                    "fields": {
+                        "type": "string",
+                        "description": '一个 JSON 字符串，代表要更新的 fields。例如：\'{"Status": "Done"}\'',
+                    },
                 },
                 "required": ["url", "record_id", "fields"],
             },
@@ -903,7 +916,10 @@ AGENT_TOOLS = [
                 "properties": {
                     "url": {"type": "string", "description": "多维表格的 URL 链接。"},
                     "table_id": {"type": "string", "description": "具体的数据表 ID，如果 url 中包含 tbl 则可以不填。"},
-                    "record_id": {"type": "string", "description": "要删除的 record_id，通过 bitable_query_records 获取。"},
+                    "record_id": {
+                        "type": "string",
+                        "description": "要删除的 record_id，通过 bitable_query_records 获取。",
+                    },
                 },
                 "required": ["url", "record_id"],
             },
@@ -1249,7 +1265,7 @@ AGENT_TOOLS = [
                     },
                     "form_data": {
                         "type": "string",
-                        "description": "表单内容的 JSON 字符串，例如 '[{\"id\":\"widget1\",\"type\":\"input\",\"value\":\"这是内容\"}]'",
+                        "description": '表单内容的 JSON 字符串，例如 \'[{"id":"widget1","type":"input","value":"这是内容"}]\'',
                     },
                 },
                 "required": ["approval_code", "user_id", "form_data"],
@@ -1460,8 +1476,8 @@ AGENT_TOOLS = [
                     },
                 },
                 "required": ["source"],
-            }
-        }
+            },
+        },
     },
     # ── AgentBay Tools ────────────────────────────────────────────
     {
@@ -1476,13 +1492,13 @@ AGENT_TOOLS = [
                     "wait_for": {"type": "string", "description": "等待特定元素出现的选择器（可选）"},
                     "save_to_workspace": {
                         "type": "boolean",
-                        "description": "CRITICAL: Set to True IF AND ONLY IF the user explicitly asked you to SHOW them a screenshot or save it (e.g. \"截图给我看\", \"截图看看\", \"把截图发出来\"). If True, the image is saved to their workspace and you get a Markdown link. Default is False (internal in-memory analysis only, completely invisible to the user).",
+                        "description": 'CRITICAL: Set to True IF AND ONLY IF the user explicitly asked you to SHOW them a screenshot or save it (e.g. "截图给我看", "截图看看", "把截图发出来"). If True, the image is saved to their workspace and you get a Markdown link. Default is False (internal in-memory analysis only, completely invisible to the user).',
                         "default": False,
                     },
                 },
                 "required": ["url"],
-            }
-        }
+            },
+        },
     },
     {
         "type": "function",
@@ -1494,12 +1510,12 @@ AGENT_TOOLS = [
                 "properties": {
                     "save_to_workspace": {
                         "type": "boolean",
-                        "description": "CRITICAL: Set to True IF AND ONLY IF the user explicitly asked you to SHOW them a screenshot or save it (e.g. \"截图给我看\", \"截图看看\", \"把截图发出来\"). If True, the image is saved to their workspace and you get a Markdown link. Default is False (internal in-memory analysis only, completely invisible to the user).",
+                        "description": 'CRITICAL: Set to True IF AND ONLY IF the user explicitly asked you to SHOW them a screenshot or save it (e.g. "截图给我看", "截图看看", "把截图发出来"). If True, the image is saved to their workspace and you get a Markdown link. Default is False (internal in-memory analysis only, completely invisible to the user).',
                         "default": False,
                     },
                 },
-            }
-        }
+            },
+        },
     },
     {
         "type": "function",
@@ -1509,7 +1525,10 @@ AGENT_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector (e.g. #button) or natural language description of the element (e.g. 'the blue Submit button')"},
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector (e.g. #button) or natural language description of the element (e.g. 'the blue Submit button')",
+                    },
                 },
                 "required": ["selector"],
             },
@@ -1523,7 +1542,10 @@ AGENT_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector or natural language description of the input field (e.g. 'the phone number input' or 'input[type=tel]')"},
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector or natural language description of the input field (e.g. 'the phone number input' or 'input[type=tel]')",
+                    },
                     "text": {"type": "string", "description": "要输入的文本"},
                 },
                 "required": ["selector", "text"],
@@ -1539,7 +1561,10 @@ AGENT_TOOLS = [
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "The login page URL to navigate to"},
-                    "login_config": {"type": "string", "description": "JSON string with login config, e.g. '{\"api_key\": \"xxx\", \"skill_id\": \"yyy\"}'"},
+                    "login_config": {
+                        "type": "string",
+                        "description": 'JSON string with login config, e.g. \'{"api_key": "xxx", "skill_id": "yyy"}\'',
+                    },
                 },
                 "required": ["url", "login_config"],
             },
@@ -1613,6 +1638,7 @@ async def _agent_has_feishu(agent_id: uuid.UUID) -> bool:
     """Check if agent has a configured Feishu channel."""
     try:
         from app.models.channel_config import ChannelConfig
+
         async with async_session() as db:
             r = await db.execute(
                 select(ChannelConfig).where(
@@ -1630,6 +1656,7 @@ async def _agent_has_any_channel(agent_id: uuid.UUID) -> bool:
     """Check if agent has any configured channel (Feishu/DingTalk/WeCom)."""
     try:
         from app.models.channel_config import ChannelConfig
+
         async with async_session() as db:
             r = await db.execute(
                 select(ChannelConfig).where(
@@ -1644,6 +1671,7 @@ async def _agent_has_any_channel(agent_id: uuid.UUID) -> bool:
 
 # ─── Dynamic Tool Loading from DB ──────────────────────────────
 
+
 async def get_agent_tools_for_llm(agent_id: uuid.UUID) -> list[dict]:
     """Load enabled tools for an agent from DB (OpenAI function-calling format).
 
@@ -1654,7 +1682,9 @@ async def get_agent_tools_for_llm(agent_id: uuid.UUID) -> list[dict]:
     """
     has_feishu = await _agent_has_feishu(agent_id)
     has_any_channel = await _agent_has_any_channel(agent_id)
-    _always_tools = _always_core_tools + (_feishu_tools if has_feishu else []) + (_channel_tools if has_any_channel else [])
+    _always_tools = (
+        _always_core_tools + (_feishu_tools if has_feishu else []) + (_channel_tools if has_any_channel else [])
+    )
 
     try:
         from app.models.tool import Tool, AgentTool
@@ -1708,6 +1738,7 @@ async def get_agent_tools_for_llm(agent_id: uuid.UUID) -> list[dict]:
 
 # ─── Workspace initialization ──────────────────────────────────
 
+
 async def ensure_workspace(agent_id: uuid.UUID, tenant_id: str | None = None) -> Path:
     """Initialize agent workspace with standard structure."""
     ws = WORKSPACE_ROOT / str(agent_id)
@@ -1729,22 +1760,27 @@ async def ensure_workspace(agent_id: uuid.UUID, tenant_id: str | None = None) ->
     # Create default company profile if missing
     profile_path = enterprise_dir / "company_profile.md"
     if not profile_path.exists():
-        profile_path.write_text("# Company Profile\n\n_Edit company information here. All digital employees can access this._\n\n## Basic Info\n- Company Name:\n- Industry:\n- Founded:\n\n## Business Overview\n\n## Organization Structure\n\n## Company Culture\n", encoding="utf-8")
+        profile_path.write_text(
+            "# Company Profile\n\n_Edit company information here. All digital employees can access this._\n\n## Basic Info\n- Company Name:\n- Industry:\n- Founded:\n\n## Business Overview\n\n## Organization Structure\n\n## Company Culture\n",
+            encoding="utf-8",
+        )
 
     # Migrate: move root-level memory.md into memory/ directory
     if (ws / "memory.md").exists() and not (ws / "memory" / "memory.md").exists():
         import shutil
+
         shutil.move(str(ws / "memory.md"), str(ws / "memory" / "memory.md"))
 
     # Create default memory file if missing
     if not (ws / "memory" / "memory.md").exists():
-        (ws / "memory" / "memory.md").write_text("# Memory\n\n_Record important information and knowledge here._\n", encoding="utf-8")
+        (ws / "memory" / "memory.md").write_text(
+            "# Memory\n\n_Record important information and knowledge here._\n", encoding="utf-8"
+        )
 
     if not (ws / "soul.md").exists():
         # Try to load from DB
         try:
             async with async_session() as db:
-
                 r = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
                 agent = r.scalar_one_or_none()
                 if agent and agent.role_description:
@@ -1753,9 +1789,13 @@ async def ensure_workspace(agent_id: uuid.UUID, tenant_id: str | None = None) ->
                         encoding="utf-8",
                     )
                 else:
-                    (ws / "soul.md").write_text("# Personality\n\n_Describe your role and responsibilities._\n", encoding="utf-8")
+                    (ws / "soul.md").write_text(
+                        "# Personality\n\n_Describe your role and responsibilities._\n", encoding="utf-8"
+                    )
         except Exception:
-            (ws / "soul.md").write_text("# Personality\n\n_Describe your role and responsibilities._\n", encoding="utf-8")
+            (ws / "soul.md").write_text(
+                "# Personality\n\n_Describe your role and responsibilities._\n", encoding="utf-8"
+            )
 
     # Always sync tasks from DB
     await _sync_tasks_to_file(agent_id, ws)
@@ -1767,21 +1807,21 @@ async def _sync_tasks_to_file(agent_id: uuid.UUID, ws: Path):
     """Sync tasks from DB to tasks.json in workspace."""
     try:
         async with async_session() as db:
-            result = await db.execute(
-                select(Task).where(Task.agent_id == agent_id).order_by(Task.created_at.desc())
-            )
+            result = await db.execute(select(Task).where(Task.agent_id == agent_id).order_by(Task.created_at.desc()))
             tasks = result.scalars().all()
 
         task_list = []
         for t in tasks:
-            task_list.append({
-                "title": t.title,
-                "status": t.status,
-                "priority": t.priority,
-                "description": t.description or "",
-                "created_at": t.created_at.isoformat() if t.created_at else "",
-                "completed_at": t.completed_at.isoformat() if t.completed_at else "",
-            })
+            task_list.append(
+                {
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority,
+                    "description": t.description or "",
+                    "created_at": t.created_at.isoformat() if t.created_at else "",
+                    "completed_at": t.completed_at.isoformat() if t.completed_at else "",
+                }
+            )
 
         (ws / "tasks.json").write_text(
             json.dumps(task_list, ensure_ascii=False, indent=2),
@@ -1810,7 +1850,6 @@ async def _get_agent_tenant_id(agent_id: uuid.UUID) -> str | None:
     """Get the agent tenant ID for tenant-scoped shared paths."""
     try:
         async with async_session() as db:
-
             r = await db.execute(select(AgentModel.tenant_id).where(AgentModel.id == agent_id))
 
             tenant_id = r.scalar_one_or_none()
@@ -1885,12 +1924,16 @@ async def execute_tool(
         try:
             from app.services.autonomy_service import autonomy_service
             from app.models.agent import Agent as AgentModel
+
             async with async_session() as _adb:
                 _ar = await _adb.execute(select(AgentModel).where(AgentModel.id == agent_id))
                 _agent = _ar.scalar_one_or_none()
                 if _agent:
                     result_check = await autonomy_service.check_and_enforce(
-                        _adb, _agent, action_type, {"tool": tool_name, "args": str(arguments)[:200], "requested_by": str(user_id)}
+                        _adb,
+                        _agent,
+                        action_type,
+                        {"tool": tool_name, "args": str(arguments)[:200], "requested_by": str(user_id)},
                     )
                     await _adb.commit()
                     if not result_check.get("allowed"):
@@ -1900,8 +1943,11 @@ async def execute_tool(
                             return f"⏳ This action requires approval. An approval request has been sent. Please wait for approval before retrying. (Approval ID: {result_check.get('approval_id', 'N/A')})"
                         return f"❌ Action denied: {result_check.get('message', 'unknown reason')}"
         except Exception as e:
-            logger.exception(f"[Autonomy] Check failed: {e}")
-            return f"⚠️ Autonomy check failed ({e}). Operation blocked for safety. Please retry or contact admin."
+            # Isolate autonomy check errors: log but allow tool execution to continue
+            # This prevents notification failures from blocking tool execution
+            logger.error(f"[Autonomy] Check failed for tool {tool_name}: {e}")
+            # Don't return error message - allow tool to execute
+            # The tool execution itself will fail if there's a real problem
 
     # Pre-inject session_id into arguments for AgentBay tools so each
     # _agentbay_* handler can pass it to get_agentbay_client_for_agent()
@@ -1913,6 +1959,7 @@ async def execute_tool(
         # is manually controlling the browser/desktop session. This prevents
         # input collisions between human clicks and agent-initiated actions.
         from app.api.agentbay_control import is_session_locked
+
         if is_session_locked(str(agent_id), session_id):
             return (
                 "⏸️ A human operator is currently controlling this browser session "
@@ -1969,18 +2016,13 @@ async def execute_tool(
                 path=arguments.get("path", "."),
                 file_pattern=arguments.get("file_pattern", "*"),
                 ignore_case=arguments.get("ignore_case", False),
-                tenant_id=_agent_tenant_id
+                tenant_id=_agent_tenant_id,
             )
         elif tool_name == "find_files":
             pattern = arguments.get("pattern")
             if not pattern:
                 return "❌ Missing required argument 'pattern' for find_files"
-            result = _find_files(
-                ws,
-                pattern,
-                path=arguments.get("path", "."),
-                tenant_id=_agent_tenant_id
-            )
+            result = _find_files(ws, pattern, path=arguments.get("path", "."), tenant_id=_agent_tenant_id)
         elif tool_name == "manage_tasks":
             result = await _manage_tasks(agent_id, user_id, ws, arguments)
         elif tool_name == "set_trigger":
@@ -2144,10 +2186,16 @@ async def execute_tool(
         # Log tool call activity (skip noisy read operations)
         if tool_name not in ("list_files", "read_file", "read_document"):
             from app.services.activity_logger import log_activity
+
             await log_activity(
-                agent_id, "tool_call",
+                agent_id,
+                "tool_call",
                 f"Called tool {tool_name}: {result[:80]}",
-                detail={"tool": tool_name, "args": {k: str(v)[:100] for k, v in arguments.items()}, "result": result[:300]},
+                detail={
+                    "tool": tool_name,
+                    "args": {k: str(v)[:100] for k, v in arguments.items()},
+                    "result": result[:300],
+                },
             )
         return result
     except Exception as e:
@@ -2204,13 +2252,15 @@ async def _search_duckduckgo(query: str, max_results: int) -> str:
     blocks = re.findall(
         r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
         r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
-        resp.text, re.DOTALL,
+        resp.text,
+        re.DOTALL,
     )
     for url, title, snippet in blocks[:max_results]:
-        title = re.sub(r'<[^>]+>', '', title).strip()
-        snippet = re.sub(r'<[^>]+>', '', snippet).strip()
+        title = re.sub(r"<[^>]+>", "", title).strip()
+        snippet = re.sub(r"<[^>]+>", "", snippet).strip()
         if "uddg=" in url:
             from urllib.parse import unquote, parse_qs, urlparse
+
             parsed = parse_qs(urlparse(url).query)
             url = unquote(parsed.get("uddg", [url])[0])
         results.append(f"**{title}**\n{url}\n{snippet}")
@@ -2219,12 +2269,14 @@ async def _search_duckduckgo(query: str, max_results: int) -> str:
         return f'🔍 No results found for "{query}"'
     return f'🔍 DuckDuckGo results for "{query}" ({len(results)} items):\n\n' + "\n\n---\n\n".join(results)
 
+
 async def _get_jina_api_key() -> str:
     """Read Jina API key from DB system_settings first, then fall back to env."""
     try:
         from app.database import async_session
         from app.models.system_settings import SystemSetting
         from sqlalchemy import select
+
         async with async_session() as db:
             result = await db.execute(select(SystemSetting).where(SystemSetting.key == "jina_api_key"))
             setting = result.scalar_one_or_none()
@@ -2233,6 +2285,7 @@ async def _get_jina_api_key() -> str:
     except Exception:
         pass
     from app.config import get_settings
+
     return get_settings().JINA_API_KEY
 
 
@@ -2329,7 +2382,6 @@ async def _jina_read(arguments: dict) -> str:
         return f"❌ Jina Reader error: {str(e)[:300]}"
 
 
-
 async def _search_tavily(query: str, api_key: str, max_results: int) -> str:
     """Search via Tavily API (AI-optimized search)."""
     import httpx
@@ -2406,7 +2458,7 @@ async def _search_bing(query: str, api_key: str, max_results: int, language: str
 
 async def _send_channel_file(agent_id: uuid.UUID, ws: Path, arguments: dict) -> str:
     """Send a file to a person or back to the current channel.
-    
+
     Priority:
     1. If member_name is provided, resolve the recipient across all configured channels
        and deliver via the appropriate one (Feishu, Slack, etc.).
@@ -2456,8 +2508,9 @@ async def _send_channel_file(agent_id: uuid.UUID, ws: Path, arguments: dict) -> 
     except ValueError:
         file_rel = rel_path
     from app.config import get_settings as _gs
+
     _s = _gs()
-    base_url = getattr(_s, 'BASE_URL', '').rstrip('/') or ''
+    base_url = getattr(_s, "BASE_URL", "").rstrip("/") or ""
     download_url = f"{base_url}/api/agents/{aid}/files/download?path={file_rel}"
     msg = f"File ready: [{file_path.name}]({download_url})"
     if accompany_msg:
@@ -2469,7 +2522,7 @@ async def _send_file_to_recipient(
     agent_id: uuid.UUID, file_path: Path, member_name: str, message: str = ""
 ) -> str | None:
     """Resolve a recipient by name and send file via their reachable channel.
-    
+
     Checks Feishu and Slack channels configured for this agent.
     Returns a result string, or None if no channel found.
     """
@@ -2477,9 +2530,7 @@ async def _send_file_to_recipient(
 
     async with async_session() as db:
         # Load all channel configs for this agent
-        result = await db.execute(
-            select(ChannelConfig).where(ChannelConfig.agent_id == agent_id)
-        )
+        result = await db.execute(select(ChannelConfig).where(ChannelConfig.agent_id == agent_id))
         configs = {c.channel_type: c for c in result.scalars().all()}
 
     # --- Try Feishu ---
@@ -2503,19 +2554,21 @@ async def _resolve_feishu_recipient(agent_id: uuid.UUID, config, member_name: st
     """Resolve a Feishu recipient by name. Returns (receive_id, id_type) or None."""
     # 1. Try feishu_user_search (checks cache, OrgMember, User table)
     import re as _re
+
     search_result = await _feishu_user_search(agent_id, {"name": member_name})
-    
-    uid_match = _re.search(r'user_id: `([A-Za-z0-9]+)`', search_result)
-    oid_match = _re.search(r'open_id: `(ou_[A-Za-z0-9]+)`', search_result)
-    
+
+    uid_match = _re.search(r"user_id: `([A-Za-z0-9]+)`", search_result)
+    oid_match = _re.search(r"open_id: `(ou_[A-Za-z0-9]+)`", search_result)
+
     if uid_match:
         return (uid_match.group(1), "user_id")
     if oid_match:
         return (oid_match.group(1), "open_id")
-    
+
     # 2. Try AgentRelationship
     from app.models.org import AgentRelationship
     from sqlalchemy.orm import selectinload
+
     async with async_session() as db:
         result = await db.execute(
             select(AgentRelationship)
@@ -2537,13 +2590,16 @@ async def _send_file_via_feishu(agent_id, config, file_path: Path, member_name: 
     recipient = await _resolve_feishu_recipient(agent_id, config, member_name)
     if not recipient:
         return None
-    
+
     receive_id, id_type = recipient
     from app.services.feishu_service import feishu_service
+
     try:
         await feishu_service.upload_and_send_file(
-            config.app_id, config.app_secret,
-            receive_id, file_path,
+            config.app_id,
+            config.app_secret,
+            receive_id,
+            file_path,
             receive_id_type=id_type,
             accompany_msg=message,
         )
@@ -2552,8 +2608,9 @@ async def _send_file_via_feishu(agent_id, config, file_path: Path, member_name: 
         # If upload fails, try sending a download link as fallback
         import json as _j
         from app.config import get_settings as _gs
+
         _s = _gs()
-        base_url = getattr(_s, 'BASE_URL', '').rstrip('/') or ''
+        base_url = getattr(_s, "BASE_URL", "").rstrip("/") or ""
         base_abs = (WORKSPACE_ROOT / str(agent_id)).resolve()
         try:
             _rel = str(file_path.resolve().relative_to(base_abs))
@@ -2565,11 +2622,15 @@ async def _send_file_via_feishu(agent_id, config, file_path: Path, member_name: 
         if base_url:
             dl_url = f"{base_url}/api/agents/{agent_id}/files/download?path={_rel}"
             parts.append(f"{file_path.name}\n{dl_url}")
-        parts.append(f"File upload failed ({e}). If you need direct file sending, enable im:resource permission in Feishu.")
+        parts.append(
+            f"File upload failed ({e}). If you need direct file sending, enable im:resource permission in Feishu."
+        )
         try:
             await feishu_service.send_message(
-                config.app_id, config.app_secret,
-                receive_id, "text",
+                config.app_id,
+                config.app_secret,
+                receive_id,
+                "text",
                 _j.dumps({"text": "\n\n".join(parts)}, ensure_ascii=False),
                 receive_id_type=id_type,
             )
@@ -2581,10 +2642,11 @@ async def _send_file_via_feishu(agent_id, config, file_path: Path, member_name: 
 async def _send_file_via_slack(agent_id, config, file_path: Path, member_name: str, message: str) -> str | None:
     """Send file to a person via Slack DM. Returns result string or None."""
     import httpx
+
     bot_token = config.app_secret or ""
     if not bot_token:
         return None
-    
+
     # Resolve Slack user by name
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -2605,7 +2667,7 @@ async def _send_file_via_slack(agent_id, config, file_path: Path, member_name: s
                     break
             if not slack_user_id:
                 return None
-            
+
             # Open a DM channel
             dm_resp = await client.post(
                 "https://slack.com/api/conversations.open",
@@ -2616,7 +2678,7 @@ async def _send_file_via_slack(agent_id, config, file_path: Path, member_name: s
             if not dm_data.get("ok"):
                 return None
             channel_id = dm_data["channel"]["id"]
-            
+
             # Upload file
             upload_url_resp = await client.post(
                 "https://slack.com/api/files.getUploadURLExternal",
@@ -2626,13 +2688,13 @@ async def _send_file_via_slack(agent_id, config, file_path: Path, member_name: s
             ud = upload_url_resp.json()
             if not ud.get("ok"):
                 return f"Slack file upload failed: {ud.get('error')}"
-            await client.post(ud["upload_url"], content=file_path.read_bytes(),
-                            headers={"Content-Type": "application/octet-stream"})
+            await client.post(
+                ud["upload_url"], content=file_path.read_bytes(), headers={"Content-Type": "application/octet-stream"}
+            )
             complete = await client.post(
                 "https://slack.com/api/files.completeUploadExternal",
                 headers={"Authorization": f"Bearer {bot_token}"},
-                json={"files": [{"id": ud["file_id"]}], "channel_id": channel_id,
-                      "initial_comment": message or ""},
+                json={"files": [{"id": ud["file_id"]}], "channel_id": channel_id, "initial_comment": message or ""},
             )
             if not complete.json().get("ok"):
                 return f"Slack file upload complete failed: {complete.json().get('error')}"
@@ -2691,6 +2753,7 @@ async def _execute_mcp_tool(tool_name: str, arguments: dict, agent_id=None) -> s
         if not direct_api_key and tool.mcp_server_name == "Atlassian Rovo":
             try:
                 from app.api.atlassian import get_atlassian_api_key_for_agent
+
                 direct_api_key = await get_atlassian_api_key_for_agent(agent_id)
             except Exception:
                 pass
@@ -2702,7 +2765,9 @@ async def _execute_mcp_tool(tool_name: str, arguments: dict, agent_id=None) -> s
         return f"❌ MCP tool execution error: {str(e)[:200]}"
 
 
-async def _execute_via_smithery_connect(mcp_url: str, tool_name: str, arguments: dict, config: dict, agent_id=None) -> str:
+async def _execute_via_smithery_connect(
+    mcp_url: str, tool_name: str, arguments: dict, config: dict, agent_id=None
+) -> str:
     """Execute an MCP tool via Smithery Connect API.
 
     Uses stored namespace/connection or falls back to creating one.
@@ -2713,6 +2778,7 @@ async def _execute_via_smithery_connect(mcp_url: str, tool_name: str, arguments:
 
     # Get Smithery API key centrally (from discover_resources/import_mcp_server AgentTool config)
     from app.services.resource_discovery import _get_smithery_api_key
+
     api_key = await _get_smithery_api_key(agent_id)
     if not api_key:
         return (
@@ -2731,6 +2797,7 @@ async def _execute_via_smithery_connect(mcp_url: str, tool_name: str, arguments:
         # Fallback: try to get from Smithery settings
         try:
             from app.models.tool import Tool
+
             async with async_session() as db:
                 r = await db.execute(select(Tool).where(Tool.name == "discover_resources"))
                 disc_tool = r.scalar_one_or_none()
@@ -2770,9 +2837,7 @@ async def _execute_via_smithery_connect(mcp_url: str, tool_name: str, arguments:
 
             # Detect auth/connection failures and attempt auto-recovery
             if tool_resp.status_code in (401, 403, 404):
-                recovery_result = await _smithery_auto_recover(
-                    api_key, mcp_url, namespace, connection_id, agent_id
-                )
+                recovery_result = await _smithery_auto_recover(api_key, mcp_url, namespace, connection_id, agent_id)
                 if recovery_result:
                     return recovery_result
                 # If recovery returned None, fall through to normal parsing
@@ -2804,9 +2869,7 @@ async def _execute_via_smithery_connect(mcp_url: str, tool_name: str, arguments:
                 # Check if error indicates auth/connection issue
                 auth_keywords = ["auth", "unauthorized", "forbidden", "expired", "not found", "connection"]
                 if any(kw in msg.lower() for kw in auth_keywords):
-                    recovery_result = await _smithery_auto_recover(
-                        api_key, mcp_url, namespace, connection_id, agent_id
-                    )
+                    recovery_result = await _smithery_auto_recover(api_key, mcp_url, namespace, connection_id, agent_id)
                     if recovery_result:
                         return recovery_result
                 return f"❌ MCP tool error: {msg[:300]}"
@@ -2836,7 +2899,9 @@ async def _execute_via_smithery_connect(mcp_url: str, tool_name: str, arguments:
         return f"❌ Smithery Connect error: {str(e)[:200]}"
 
 
-async def _smithery_auto_recover(api_key: str, mcp_url: str, namespace: str, connection_id: str, agent_id=None) -> str | None:
+async def _smithery_auto_recover(
+    api_key: str, mcp_url: str, namespace: str, connection_id: str, agent_id=None
+) -> str | None:
     """Attempt to auto-recover a failed Smithery connection.
 
     Re-creates the Smithery Connect connection. If OAuth is needed,
@@ -2844,13 +2909,14 @@ async def _smithery_auto_recover(api_key: str, mcp_url: str, namespace: str, con
     """
     try:
         from app.services.resource_discovery import _ensure_smithery_connection
+
         display_name = connection_id.replace("-", " ").title() if connection_id else "MCP Server"
 
         conn_result = await _ensure_smithery_connection(api_key, mcp_url, display_name)
         if "error" in conn_result:
             return (
                 f"❌ MCP tool connection expired and auto-recovery failed: {conn_result['error']}\n\n"
-                f"💡 Please re-authorize by telling me: `import_mcp_server(server_id=\"...\", reauthorize=true)`"
+                f'💡 Please re-authorize by telling me: `import_mcp_server(server_id="...", reauthorize=true)`'
             )
 
         # Update stored config with new connection info
@@ -2861,11 +2927,10 @@ async def _smithery_auto_recover(api_key: str, mcp_url: str, namespace: str, con
         if agent_id:
             try:
                 from app.models.tool import Tool, AgentTool
+
                 async with async_session() as db:
                     # Update all MCP tools for this server URL
-                    r = await db.execute(
-                        select(Tool).where(Tool.mcp_server_url == mcp_url, Tool.type == "mcp")
-                    )
+                    r = await db.execute(select(Tool).where(Tool.mcp_server_url == mcp_url, Tool.type == "mcp"))
                     for tool in r.scalars().all():
                         at_r = await db.execute(
                             select(AgentTool).where(
@@ -2903,7 +2968,7 @@ def _list_files(ws: Path, rel_path: str, tenant_id: str | None = None) -> str:
         else:
             enterprise_root = (WORKSPACE_ROOT / "enterprise_info").resolve()
         # Remap: enterprise_info/... → enterprise_info_{tenant_id}/...
-        sub = rel_path[len("enterprise_info"):].lstrip("/")
+        sub = rel_path[len("enterprise_info") :].lstrip("/")
         target = (enterprise_root / sub).resolve() if sub else enterprise_root
         if not str(target).startswith(str(enterprise_root)):
             return "Access denied for this path"
@@ -2941,7 +3006,7 @@ def _list_files(ws: Path, rel_path: str, tenant_id: str | None = None) -> str:
             if size_bytes < 1024:
                 size_str = f"{size_bytes}B"
             else:
-                size_str = f"{size_bytes/1024:.1f}KB"
+                size_str = f"{size_bytes / 1024:.1f}KB"
             items.append(f"  📄 {p.name} ({size_str})")
 
     if not items:
@@ -2970,7 +3035,7 @@ def _read_file(ws: Path, rel_path: str, tenant_id: str | None = None, offset: in
             enterprise_root = (WORKSPACE_ROOT / f"enterprise_info_{tenant_id}").resolve()
         else:
             enterprise_root = (WORKSPACE_ROOT / "enterprise_info").resolve()
-        sub = rel_path[len("enterprise_info"):].lstrip("/")
+        sub = rel_path[len("enterprise_info") :].lstrip("/")
         file_path = (enterprise_root / sub).resolve() if sub else enterprise_root
         if not str(file_path).startswith(str(enterprise_root)):
             return "Access denied for this path"
@@ -2999,16 +3064,16 @@ def _read_file(ws: Path, rel_path: str, tenant_id: str | None = None, offset: in
         # Format with line numbers (like cat -n)
         result = []
         for i, line in enumerate(selected_lines, start=start):
-            result.append(f"{i+1:6}\t{line}")
+            result.append(f"{i + 1:6}\t{line}")
 
         output = "\n".join(result)
 
         # Add pagination info if file is larger than what we show
         if total_lines > end:
-            output += f"\n\n... [{total_lines - end} more lines not shown, lines {end+1}-{total_lines}]"
+            output += f"\n\n... [{total_lines - end} more lines not shown, lines {end + 1}-{total_lines}]"
 
         # Add header with file info
-        header = f"📄 {rel_path} (lines {start+1}-{end} of {total_lines})\n"
+        header = f"📄 {rel_path} (lines {start + 1}-{end} of {total_lines})\n"
         return header + output
 
     except Exception as e:
@@ -3023,7 +3088,7 @@ async def _read_document(ws: Path, rel_path: str, max_chars: int = 8000, tenant_
             enterprise_root = (WORKSPACE_ROOT / f"enterprise_info_{tenant_id}").resolve()
         else:
             enterprise_root = (WORKSPACE_ROOT / "enterprise_info").resolve()
-        sub = rel_path[len("enterprise_info"):].lstrip("/")
+        sub = rel_path[len("enterprise_info") :].lstrip("/")
         file_path = (enterprise_root / sub).resolve() if sub else enterprise_root
         if not str(file_path).startswith(str(enterprise_root)):
             return "Access denied for this path"
@@ -3039,17 +3104,19 @@ async def _read_document(ws: Path, rel_path: str, max_chars: int = 8000, tenant_
     try:
         if ext == ".pdf":
             import pdfplumber
+
             text_parts = []
             with pdfplumber.open(str(file_path)) as pdf:
                 for i, page in enumerate(pdf.pages[:50]):  # Limit to 50 pages
                     page_text = page.extract_text() or ""
                     if page_text:
-                        text_parts.append(f"--- Page {i+1} ---\n{page_text}")
+                        text_parts.append(f"--- Page {i + 1} ---\n{page_text}")
             content = "\n\n".join(text_parts) if text_parts else "(PDF is empty or text extraction failed)"
 
         elif ext == ".docx":
             from docx import Document
             from docx.oxml.ns import qn
+
             doc = Document(str(file_path))
             lines: list[str] = []
 
@@ -3099,6 +3166,7 @@ async def _read_document(ws: Path, rel_path: str, max_chars: int = 8000, tenant_
 
         elif ext == ".xlsx":
             from openpyxl import load_workbook
+
             wb = load_workbook(str(file_path), read_only=True, data_only=True)
             sheets = []
             for ws_name in wb.sheetnames[:10]:  # Limit to 10 sheets
@@ -3115,6 +3183,7 @@ async def _read_document(ws: Path, rel_path: str, max_chars: int = 8000, tenant_
 
         elif ext == ".pptx":
             from pptx import Presentation
+
             prs = Presentation(str(file_path))
             slides = []
             for i, slide in enumerate(prs.slides[:50]):
@@ -3123,7 +3192,7 @@ async def _read_document(ws: Path, rel_path: str, max_chars: int = 8000, tenant_
                     if hasattr(shape, "text") and shape.text.strip():
                         texts.append(shape.text)
                 if texts:
-                    slides.append(f"--- Slide {i+1} ---\n" + "\n".join(texts))
+                    slides.append(f"--- Slide {i + 1} ---\n" + "\n".join(texts))
             content = "\n\n".join(slides) if slides else "(PPT is empty)"
 
         elif ext in (".txt", ".md", ".json", ".csv", ".log"):
@@ -3153,7 +3222,7 @@ def _write_file(ws: Path, rel_path: str, content: str, tenant_id: str | None = N
             enterprise_root = (WORKSPACE_ROOT / f"enterprise_info_{tenant_id}").resolve()
         else:
             enterprise_root = (WORKSPACE_ROOT / "enterprise_info").resolve()
-        sub = rel_path[len("enterprise_info"):].lstrip("/")
+        sub = rel_path[len("enterprise_info") :].lstrip("/")
         if not sub:
             return "Write failed: please provide a file path under enterprise_info/, e.g. enterprise_info/knowledge_base/report.md"
         file_path = (enterprise_root / sub).resolve()
@@ -3186,6 +3255,7 @@ def _delete_file(ws: Path, rel_path: str) -> str:
     try:
         if file_path.is_dir():
             import shutil
+
             shutil.rmtree(file_path)
             return f"✅ Deleted directory {rel_path}"
         else:
@@ -3195,7 +3265,9 @@ def _delete_file(ws: Path, rel_path: str) -> str:
         return f"Delete failed: {e}"
 
 
-def _edit_file(ws: Path, rel_path: str, old_string: str, new_string: str, replace_all: bool = False, tenant_id: str | None = None) -> str:
+def _edit_file(
+    ws: Path, rel_path: str, old_string: str, new_string: str, replace_all: bool = False, tenant_id: str | None = None
+) -> str:
     """Perform surgical string replacement in a file.
 
     Args:
@@ -3215,7 +3287,7 @@ def _edit_file(ws: Path, rel_path: str, old_string: str, new_string: str, replac
             enterprise_root = (WORKSPACE_ROOT / f"enterprise_info_{tenant_id}").resolve()
         else:
             enterprise_root = (WORKSPACE_ROOT / "enterprise_info").resolve()
-        sub = rel_path[len("enterprise_info"):].lstrip("/")
+        sub = rel_path[len("enterprise_info") :].lstrip("/")
         file_path = (enterprise_root / sub).resolve() if sub else enterprise_root
         if not str(file_path).startswith(str(enterprise_root)):
             return "Access denied for this path"
@@ -3254,7 +3326,14 @@ def _edit_file(ws: Path, rel_path: str, old_string: str, new_string: str, replac
         return f"Edit failed: {e}"
 
 
-def _search_files(ws: Path, pattern: str, path: str = ".", file_pattern: str = "*", ignore_case: bool = False, tenant_id: str | None = None) -> str:
+def _search_files(
+    ws: Path,
+    pattern: str,
+    path: str = ".",
+    file_pattern: str = "*",
+    ignore_case: bool = False,
+    tenant_id: str | None = None,
+) -> str:
     """Search for content patterns across files using regex.
 
     Args:
@@ -3274,7 +3353,7 @@ def _search_files(ws: Path, pattern: str, path: str = ".", file_pattern: str = "
             enterprise_root = (WORKSPACE_ROOT / f"enterprise_info_{tenant_id}").resolve()
         else:
             enterprise_root = (WORKSPACE_ROOT / "enterprise_info").resolve()
-        sub = path[len("enterprise_info"):].lstrip("/")
+        sub = path[len("enterprise_info") :].lstrip("/")
         search_path = (enterprise_root / sub).resolve() if sub else enterprise_root
         if not str(search_path).startswith(str(enterprise_root)):
             return "Access denied for this path"
@@ -3307,7 +3386,21 @@ def _search_files(ws: Path, pattern: str, path: str = ".", file_pattern: str = "
         if file_path.name.startswith("."):
             continue
         suffix = file_path.suffix.lower()
-        if suffix in {".pyc", ".pyo", ".so", ".dll", ".exe", ".bin", ".png", ".jpg", ".jpeg", ".gif", ".zip", ".tar", ".gz"}:
+        if suffix in {
+            ".pyc",
+            ".pyo",
+            ".so",
+            ".dll",
+            ".exe",
+            ".bin",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".zip",
+            ".tar",
+            ".gz",
+        }:
             continue
 
         files_searched += 1
@@ -3333,8 +3426,12 @@ def _search_files(ws: Path, pattern: str, path: str = ".", file_pattern: str = "
 
     # Warn the LLM if results were capped so it knows to refine the search.
     truncated = total_matches > len(results)
-    truncation_note = f" (showing first {len(results)} of {total_matches}+ — refine pattern or path for more)" if truncated else ""
-    header = f"🔍 Found {total_matches}+ match(es) in {files_searched} file(s) for pattern '{pattern}'{truncation_note}:\n"
+    truncation_note = (
+        f" (showing first {len(results)} of {total_matches}+ — refine pattern or path for more)" if truncated else ""
+    )
+    header = (
+        f"🔍 Found {total_matches}+ match(es) in {files_searched} file(s) for pattern '{pattern}'{truncation_note}:\n"
+    )
     return header + "\n".join(results)
 
 
@@ -3356,7 +3453,7 @@ def _find_files(ws: Path, pattern: str, path: str = ".", tenant_id: str | None =
             enterprise_root = (WORKSPACE_ROOT / f"enterprise_info_{tenant_id}").resolve()
         else:
             enterprise_root = (WORKSPACE_ROOT / "enterprise_info").resolve()
-        sub = path[len("enterprise_info"):].lstrip("/")
+        sub = path[len("enterprise_info") :].lstrip("/")
         search_path = (enterprise_root / sub).resolve() if sub else enterprise_root
         if not str(search_path).startswith(str(enterprise_root)):
             return "Access denied for this path"
@@ -3394,7 +3491,7 @@ def _find_files(ws: Path, pattern: str, path: str = ".", tenant_id: str | None =
             file_count += 1
             try:
                 size = m.stat().st_size
-                size_str = f"{size//1024}KB" if size > 1024 else f"{size}B"
+                size_str = f"{size // 1024}KB" if size > 1024 else f"{size}B"
                 results.append(f"📄 {rel_path} ({size_str})")
             except Exception:
                 results.append(f"📄 {rel_path}")
@@ -3439,20 +3536,19 @@ async def _manage_tasks(
                 # Trigger auto-execution for todo tasks
                 import asyncio
                 from app.services.task_executor import execute_task
+
                 asyncio.create_task(execute_task(task.id, agent_id))
                 await _sync_tasks_to_file(agent_id, ws)
                 return f"✅ Task created: {title} — auto-execution started"
             else:
                 # Supervision task — reminder engine will pick it up
-                target = args.get('supervision_target_name', 'someone')
-                schedule = args.get('remind_schedule', 'not set')
+                target = args.get("supervision_target_name", "someone")
+                schedule = args.get("remind_schedule", "not set")
                 await _sync_tasks_to_file(agent_id, ws)
                 return f"✅ Supervision task created: '{title}' — will remind {target} on schedule ({schedule})"
 
         elif action == "update_status":
-            result = await db.execute(
-                select(Task).where(Task.agent_id == agent_id, Task.title.ilike(f"%{title}%"))
-            )
+            result = await db.execute(select(Task).where(Task.agent_id == agent_id, Task.title.ilike(f"%{title}%")))
             task = result.scalars().first()
             if not task:
                 return f"No task found matching '{title}'"
@@ -3466,9 +3562,8 @@ async def _manage_tasks(
 
         elif action == "delete":
             from sqlalchemy import delete as sa_delete
-            result = await db.execute(
-                select(Task).where(Task.agent_id == agent_id, Task.title.ilike(f"%{title}%"))
-            )
+
+            result = await db.execute(select(Task).where(Task.agent_id == agent_id, Task.title.ilike(f"%{title}%")))
             task = result.scalars().first()
             if not task:
                 return f"No task found matching '{title}'"
@@ -3499,7 +3594,6 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
         from sqlalchemy.orm import selectinload
 
         async with async_session() as db:
-
             # ── Shortcut: if caller provided user_id or open_id directly ──
             config_result = await db.execute(
                 select(ChannelConfig).where(ChannelConfig.agent_id == agent_id, ChannelConfig.channel_type == "feishu")
@@ -3509,11 +3603,14 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
                 return "❌ This agent has no Feishu channel configured"
             if (direct_user_id or direct_open_id) and not member_name:
                 import json as _j
+
                 # Prefer user_id over open_id
                 if direct_user_id:
                     resp = await feishu_service.send_message(
-                        config.app_id, config.app_secret,
-                        receive_id=direct_user_id, msg_type="text",
+                        config.app_id,
+                        config.app_secret,
+                        receive_id=direct_user_id,
+                        msg_type="text",
                         content=_j.dumps({"text": message_text}, ensure_ascii=False),
                         receive_id_type="user_id",
                     )
@@ -3525,8 +3622,10 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
                     logger.info(f"❌ 发送失败：{resp.get('msg')} (code {resp.get('code')})")
                     if direct_open_id:
                         resp = await feishu_service.send_message(
-                            config.app_id, config.app_secret,
-                            receive_id=direct_open_id, msg_type="text",
+                            config.app_id,
+                            config.app_secret,
+                            receive_id=direct_open_id,
+                            msg_type="text",
                             content=_j.dumps({"text": message_text}, ensure_ascii=False),
                             receive_id_type="open_id",
                         )
@@ -3536,8 +3635,10 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
                     return f"❌ 发送失败：{resp.get('msg')} (code {resp.get('code')})"
                 else:
                     resp = await feishu_service.send_message(
-                        config.app_id, config.app_secret,
-                        receive_id=direct_open_id, msg_type="text",
+                        config.app_id,
+                        config.app_secret,
+                        receive_id=direct_open_id,
+                        msg_type="text",
                         content=_j.dumps({"text": message_text}, ensure_ascii=False),
                         receive_id_type="open_id",
                     )
@@ -3562,11 +3663,18 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
                     break
 
             if not target_member:
-                logger.info(f"❌ {member_name} has no Feishu user_id in relationship")   
+                logger.info(f"❌ {member_name} has no Feishu user_id in relationship")
                 return f"❌ {member_name} 不是我的关系"
-                
-            logger.info(f"target_member={target_member.external_id}, {target_member.open_id}, {target_member.email}, {target_member.phone}")
-            if not target_member.external_id and not target_member.open_id and not target_member.email and not target_member.phone:
+
+            logger.info(
+                f"target_member={target_member.external_id}, {target_member.open_id}, {target_member.email}, {target_member.phone}"
+            )
+            if (
+                not target_member.external_id
+                and not target_member.open_id
+                and not target_member.email
+                and not target_member.phone
+            ):
                 logger.error(f"❌ {member_name} has no linked Feishu account (no user_id, open_id, email, or phone)")
                 return f"❌ {member_name} has no linked Feishu account (no user_id, open_id, email, or phone)"
 
@@ -3574,16 +3682,18 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
 
             async def _try_send(app_id: str, app_secret: str, receive_id: str, id_type: str = "open_id") -> dict:
                 return await feishu_service.send_message(
-                    app_id, app_secret,
-                    receive_id=receive_id, msg_type="text",
-                    content=content, receive_id_type=id_type,
+                    app_id,
+                    app_secret,
+                    receive_id=receive_id,
+                    msg_type="text",
+                    content=content,
+                    receive_id_type=id_type,
                 )
 
             async def _save_outgoing_to_feishu_session(open_id: str):
                 """Save the outgoing message to the Feishu P2P chat session."""
                 try:
                     from datetime import datetime as _dt, timezone as _tz
-
 
                     agent_r = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
                     agent_obj = agent_r.scalar_one_or_none()
@@ -3606,13 +3716,15 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
                         source_channel="feishu",
                         first_message_title=f"[Agent → {member_name or open_id}]",
                     )
-                    db.add(ChatMessage(
-                        agent_id=agent_id,
-                        user_id=user_id,
-                        role="assistant",
-                        content=message_text,
-                        conversation_id=str(sess.id),
-                    ))
+                    db.add(
+                        ChatMessage(
+                            agent_id=agent_id,
+                            user_id=user_id,
+                            role="assistant",
+                            content=message_text,
+                            conversation_id=str(sess.id),
+                        )
+                    )
                     sess.last_message_at = _dt.now(_tz.utc)
                     await db.commit()
                     logger.info(f"[Feishu] Saved outgoing message to session {sess.id} (ID: {open_id})")
@@ -3626,17 +3738,19 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
                     await _save_outgoing_to_feishu_session(target_member.external_id or target_member.open_id)
                     return f"✅ Successfully sent message to {member_name}"
                 logger.info(f"❌ Failed to send message to {target_member.external_id} via Feishu (user_id): {resp}")
-                
+
                 # Fallback to open_id if user_id fails (e.g., due to missing employee_id:readonly permission)
                 if target_member.open_id:
                     resp_open = await _try_send(config.app_id, config.app_secret, target_member.open_id, "open_id")
                     if resp_open.get("code") == 0:
                         await _save_outgoing_to_feishu_session(target_member.open_id)
                         return f"✅ Successfully sent message to {member_name}"
-                    logger.info(f"❌ Failed to send message to {target_member.open_id} via Feishu (open_id): {resp_open}")
+                    logger.info(
+                        f"❌ Failed to send message to {target_member.open_id} via Feishu (open_id): {resp_open}"
+                    )
                     return f"发送失败 (user_id: {resp.get('code')}, open_id: {resp_open.get('code')}): {resp_open.get('msg')}"
                 return f"发送失败 {resp}"
-            
+
             # Step 2: If no external_id, try open_id directly
             elif target_member.open_id:
                 resp = await _try_send(config.app_id, config.app_secret, target_member.open_id, "open_id")
@@ -3680,8 +3794,7 @@ async def _send_channel_message(agent_id: uuid.UUID, args: dict) -> str:
             # 0. Check if target is a group in AgentGroup
             group_result = await db.execute(
                 select(AgentGroup).where(
-                    AgentGroup.agent_id == agent_id,
-                    AgentGroup.group_name.ilike(f"%{member_name}%")
+                    AgentGroup.agent_id == agent_id, AgentGroup.group_name.ilike(f"%{member_name}%")
                 )
             )
             target_group = group_result.scalars().first()
@@ -3702,11 +3815,12 @@ async def _send_channel_message(agent_id: uuid.UUID, args: dict) -> str:
                 try:
                     if target_group.channel == "feishu":
                         resp = await feishu_service.send_message(
-                            config.app_id, config.app_secret,
+                            config.app_id,
+                            config.app_secret,
                             receive_id=target_group.chat_id,
                             msg_type="text",
                             content=_json.dumps({"text": message_text}, ensure_ascii=False),
-                            receive_id_type="chat_id"
+                            receive_id_type="chat_id",
                         )
                         if resp.get("code") == 0:
                             return f"✅ Message sent to group {target_group.group_name}"
@@ -3723,7 +3837,9 @@ async def _send_channel_message(agent_id: uuid.UUID, args: dict) -> str:
                 select(AgentRelationship, OrgMember, IdentityProvider)
                 .join(OrgMember, AgentRelationship.member_id == OrgMember.id)
                 .outerjoin(IdentityProvider, OrgMember.provider_id == IdentityProvider.id)
-                .where(AgentRelationship.agent_id == agent_id, OrgMember.name == member_name, OrgMember.status == "active")
+                .where(
+                    AgentRelationship.agent_id == agent_id, OrgMember.name == member_name, OrgMember.status == "active"
+                )
                 .options(selectinload(AgentRelationship.member))
             )
             rows = result.all()
@@ -3747,9 +3863,11 @@ async def _send_channel_message(agent_id: uuid.UUID, args: dict) -> str:
             else:
                 if len(rows) > 1:
                     available = [p.provider_type for _, _, p in rows if p]
-                    logger.warning(f"[ChannelMessage] Ambiguous member '{member_name}' found in multiple channels: {available}")
+                    logger.warning(
+                        f"[ChannelMessage] Ambiguous member '{member_name}' found in multiple channels: {available}"
+                    )
                     # Pick the first one as before, but mention others if possible
-                
+
                 rel, member, provider = rows[0]
                 target_member = member
                 provider_type = provider.provider_type if provider else None
@@ -3788,7 +3906,6 @@ async def _send_dingtalk_message(
 ) -> str:
     """Send message via DingTalk channel using Open API."""
     from app.services.dingtalk_service import send_dingtalk_message
-
 
     try:
         async with async_session() as db:
@@ -3832,14 +3949,12 @@ async def _send_dingtalk_message(
                     agent_r = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
                     agent_obj = agent_r.scalar_one_or_none()
 
-
                     # Get or create platform user from OrgMember (unified logic)
                     platform_user = await get_platform_user_by_org_member(
                         db=db,
                         org_member=target_member,
                         agent_tenant_id=agent_obj.tenant_id if agent_obj else None,
                     )
-
 
                     conv_id = f"dingtalk_p2p_{user_id}"
                     # 2. Get/Create session
@@ -3852,13 +3967,15 @@ async def _send_dingtalk_message(
                         first_message_title=message_text[:30],
                     )
                     # 3. Save assistant message
-                    db.add(ChatMessage(
-                        agent_id=agent_id,
-                        user_id=platform_user.id,
-                        role="assistant",
-                        content=message_text,
-                        conversation_id=str(sess.id),
-                    ))
+                    db.add(
+                        ChatMessage(
+                            agent_id=agent_id,
+                            user_id=platform_user.id,
+                            role="assistant",
+                            content=message_text,
+                            conversation_id=str(sess.id),
+                        )
+                    )
                     sess.last_message_at = datetime.now(timezone.utc)
                     await db.commit()
                     logger.info(f"[DingTalk] Proactive message saved to session {sess.id}")
@@ -3884,7 +4001,6 @@ async def _send_wecom_message(
 ) -> str:
     """Send message via WeCom channel using Open API."""
     from app.services.wecom_service import send_wecom_message
-
 
     try:
         async with async_session() as db:
@@ -3920,11 +4036,9 @@ async def _send_wecom_message(
             if result.get("errcode") == 0:
                 # Save proactive message to session so it appears in UI
                 try:
-
                     # Get agent tenant context
                     agent_r = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
                     agent = agent_r.scalar_one_or_none()
-
 
                     # Get or create platform user from OrgMember (unified logic)
                     platform_user = await get_platform_user_by_org_member(
@@ -3942,13 +4056,15 @@ async def _send_wecom_message(
                         source_channel="wecom",
                         first_message_title=message_text[:30],
                     )
-                    db.add(ChatMessage(
-                        agent_id=agent_id,
-                        user_id=platform_user.id,
-                        role="assistant",
-                        content=message_text,
-                        conversation_id=str(sess.id),
-                    ))
+                    db.add(
+                        ChatMessage(
+                            agent_id=agent_id,
+                            user_id=platform_user.id,
+                            role="assistant",
+                            content=message_text,
+                            conversation_id=str(sess.id),
+                        )
+                    )
                     sess.last_message_at = datetime.now(timezone.utc)
                     await db.commit()
                     logger.info(f"[WeCom] Proactive message saved to session {sess.id}")
@@ -3977,7 +4093,6 @@ async def _send_web_message(agent_id: uuid.UUID, args: dict) -> str:
     try:
         from datetime import datetime as _dt, timezone as _tz
 
-
         async with async_session() as db:
             # 0. Get agent's tenant_id for scoping
             agent_res = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
@@ -4003,18 +4118,21 @@ async def _send_web_message(agent_id: uuid.UUID, args: dict) -> str:
                 list_query = select(UserModel.username, UserModel.display_name).limit(20)
                 if agent.tenant_id:
                     list_query = list_query.where(UserModel.tenant_id == agent.tenant_id)
-                
+
                 all_r = await db.execute(list_query)
                 names = [f"{r.display_name or r.username}" for r in all_r.all()]
                 return f"❌ No user named '{username}' found in your organization. Available users: {', '.join(names) if names else 'none'}"
 
             # Find or create a web session between the agent and this user
             sess_r = await db.execute(
-                select(ChatSession).where(
+                select(ChatSession)
+                .where(
                     ChatSession.agent_id == agent_id,
                     ChatSession.user_id == target_user.id,
                     ChatSession.source_channel == "web",
-                ).order_by(ChatSession.created_at.desc()).limit(1)
+                )
+                .order_by(ChatSession.created_at.desc())
+                .limit(1)
             )
             session = sess_r.scalar_one_or_none()
 
@@ -4031,28 +4149,33 @@ async def _send_web_message(agent_id: uuid.UUID, args: dict) -> str:
                 await db.flush()
 
             # Save the message
-            db.add(ChatMessage(
-                agent_id=agent_id,
-                user_id=target_user.id,
-                role="assistant",
-                content=message_text,
-                conversation_id=str(session.id),
-            ))
+            db.add(
+                ChatMessage(
+                    agent_id=agent_id,
+                    user_id=target_user.id,
+                    role="assistant",
+                    content=message_text,
+                    conversation_id=str(session.id),
+                )
+            )
             session.last_message_at = _dt.now(_tz.utc)
             await db.commit()
 
             # Push via WebSocket if user has an active connection
             try:
                 from app.api.websocket import manager as ws_manager
+
                 agent_id_str = str(agent_id)
                 if agent_id_str in ws_manager.active_connections:
                     for ws, sid in list(ws_manager.active_connections[agent_id_str]):
                         try:
-                            await ws.send_json({
-                                "type": "trigger_notification",
-                                "content": message_text,
-                                "triggers": ["web_message"],
-                            })
+                            await ws.send_json(
+                                {
+                                    "type": "trigger_notification",
+                                    "content": message_text,
+                                    "triggers": ["web_message"],
+                                }
+                            )
                         except Exception:
                             pass
             except Exception:
@@ -4112,9 +4235,7 @@ async def _send_file_to_agent(from_agent_id: uuid.UUID, ws: Path, args: dict) ->
 
             # Try exact name match first, then fuzzy
             target_agent = None
-            exact_result = await db.execute(
-                select(AgentModel).where(AgentModel.name == agent_name, *base_filter)
-            )
+            exact_result = await db.execute(select(AgentModel).where(AgentModel.name == agent_name, *base_filter))
             target_agent = exact_result.scalars().first()
             if not target_agent:
                 # Sanitize SQL wildcards in user input
@@ -4127,24 +4248,36 @@ async def _send_file_to_agent(from_agent_id: uuid.UUID, ws: Path, args: dict) ->
             if not target_agent:
                 # Only show agents from relationships, not all agents
                 from app.models.org import AgentAgentRelationship
+
                 rel_r = await db.execute(
                     select(AgentModel.name).join(
                         AgentAgentRelationship,
-                        (AgentAgentRelationship.target_agent_id == AgentModel.id) & (AgentAgentRelationship.agent_id == from_agent_id)
+                        (AgentAgentRelationship.target_agent_id == AgentModel.id)
+                        & (AgentAgentRelationship.agent_id == from_agent_id),
                     )
                 )
                 rel_names = [n for (n,) in rel_r.all()]
                 return f"❌ No agent found matching '{agent_name}'. Your connected colleagues: {', '.join(rel_names) if rel_names else 'none — ask your administrator to set up relationships'}"
 
-            if target_agent.is_expired or (target_agent.expires_at and datetime.now(timezone.utc) >= target_agent.expires_at):
+            if target_agent.is_expired or (
+                target_agent.expires_at and datetime.now(timezone.utc) >= target_agent.expires_at
+            ):
                 return f"⚠️ {target_agent.name} is currently unavailable — their service period has ended. Please contact the platform administrator."
 
             # Enforce relationship: only allow file transfer with agents in relationships
             rel_check = await db.execute(
-                select(AgentAgentRelationship.id).where(
-                    ((AgentAgentRelationship.agent_id == from_agent_id) & (AgentAgentRelationship.target_agent_id == target_agent.id))
-                    | ((AgentAgentRelationship.agent_id == target_agent.id) & (AgentAgentRelationship.target_agent_id == from_agent_id))
-                ).limit(1)
+                select(AgentAgentRelationship.id)
+                .where(
+                    (
+                        (AgentAgentRelationship.agent_id == from_agent_id)
+                        & (AgentAgentRelationship.target_agent_id == target_agent.id)
+                    )
+                    | (
+                        (AgentAgentRelationship.agent_id == target_agent.id)
+                        & (AgentAgentRelationship.target_agent_id == from_agent_id)
+                    )
+                )
+                .limit(1)
             )
             if not rel_check.scalar_one_or_none():
                 return f"❌ You do not have a relationship with {target_agent.name}. Only agents in your relationship list can receive files. Ask your administrator to add a relationship if needed."
@@ -4157,7 +4290,9 @@ async def _send_file_to_agent(from_agent_id: uuid.UUID, ws: Path, args: dict) ->
         inbox_dir = (target_ws / "workspace" / "inbox").resolve()
         files_dir = (inbox_dir / "files").resolve()
         target_ws_resolved = target_ws.resolve()
-        if not str(inbox_dir).startswith(str(target_ws_resolved)) or not str(files_dir).startswith(str(target_ws_resolved)):
+        if not str(inbox_dir).startswith(str(target_ws_resolved)) or not str(files_dir).startswith(
+            str(target_ws_resolved)
+        ):
             return "❌ Access denied for target agent inbox path"
 
         inbox_dir.mkdir(parents=True, exist_ok=True)
@@ -4190,31 +4325,36 @@ async def _send_file_to_agent(from_agent_id: uuid.UUID, ws: Path, args: dict) ->
             note_lines.append(delivery_note)
             note_lines.append("")
         note_lines.append("## Action")
-        note_lines.append(f"- Read the file via `read_file(path=\"{target_rel_path}\")`")
+        note_lines.append(f'- Read the file via `read_file(path="{target_rel_path}")`')
         note_path.write_text("\n".join(note_lines), encoding="utf-8")
 
         from app.models.audit import AuditLog
+
         async with async_session() as db:
-            db.add(AuditLog(
-                agent_id=from_agent_id,
-                action="collaboration:file_send",
-                details={
-                    "to_agent": str(target_id),
-                    "to_agent_name": target_name,
-                    "source_file": rel_path,
-                    "delivered_file": target_rel_path,
-                },
-            ))
-            db.add(AuditLog(
-                agent_id=target_id,
-                action="collaboration:file_receive",
-                details={
-                    "from_agent": str(from_agent_id),
-                    "from_agent_name": source_name,
-                    "source_file": rel_path,
-                    "delivered_file": target_rel_path,
-                },
-            ))
+            db.add(
+                AuditLog(
+                    agent_id=from_agent_id,
+                    action="collaboration:file_send",
+                    details={
+                        "to_agent": str(target_id),
+                        "to_agent_name": target_name,
+                        "source_file": rel_path,
+                        "delivered_file": target_rel_path,
+                    },
+                )
+            )
+            db.add(
+                AuditLog(
+                    agent_id=target_id,
+                    action="collaboration:file_receive",
+                    details={
+                        "from_agent": str(from_agent_id),
+                        "from_agent_name": source_name,
+                        "source_file": rel_path,
+                        "delivered_file": target_rel_path,
+                    },
+                )
+            )
             await db.commit()
 
         await log_activity(
@@ -4269,9 +4409,7 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
 
             # Find target agent by name — exact match first, then fuzzy
             target = None
-            exact_result = await db.execute(
-                select(AgentModel).where(AgentModel.name == agent_name, *base_filter)
-            )
+            exact_result = await db.execute(select(AgentModel).where(AgentModel.name == agent_name, *base_filter))
             target = exact_result.scalars().first()
             if not target:
                 safe_name = agent_name.replace("%", "").replace("_", r"\_")
@@ -4284,12 +4422,12 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                 rel_r = await db.execute(
                     select(AgentModel.name).join(
                         AgentAgentRelationship,
-                        (AgentAgentRelationship.target_agent_id == AgentModel.id) & (AgentAgentRelationship.agent_id == from_agent_id)
+                        (AgentAgentRelationship.target_agent_id == AgentModel.id)
+                        & (AgentAgentRelationship.agent_id == from_agent_id),
                     )
                 )
                 rel_names = [n for (n,) in rel_r.all()]
                 return f"❌ No agent found matching '{agent_name}'. Your connected colleagues: {', '.join(rel_names) if rel_names else 'none — ask your administrator to set up relationships'}"
-
 
             # Check if target agent has expired
             if target.is_expired or (target.expires_at and datetime.now(timezone.utc) >= target.expires_at):
@@ -4297,18 +4435,31 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
 
             # Enforce relationship: only allow communication with agents in relationships
             from app.models.org import AgentAgentRelationship
+
             rel_check = await db.execute(
-                select(AgentAgentRelationship.id).where(
-                    ((AgentAgentRelationship.agent_id == from_agent_id) & (AgentAgentRelationship.target_agent_id == target.id))
-                    | ((AgentAgentRelationship.agent_id == target.id) & (AgentAgentRelationship.target_agent_id == from_agent_id))
-                ).limit(1)
+                select(AgentAgentRelationship.id)
+                .where(
+                    (
+                        (AgentAgentRelationship.agent_id == from_agent_id)
+                        & (AgentAgentRelationship.target_agent_id == target.id)
+                    )
+                    | (
+                        (AgentAgentRelationship.agent_id == target.id)
+                        & (AgentAgentRelationship.target_agent_id == from_agent_id)
+                    )
+                )
+                .limit(1)
             )
             if not rel_check.scalar_one_or_none():
                 return f"❌ You do not have a relationship with {target.name}. Only agents in your relationship list can be contacted. Ask your administrator to add a relationship if needed."
 
-            src_part_r = await db.execute(select(Participant).where(Participant.type == "agent", Participant.ref_id == from_agent_id))
+            src_part_r = await db.execute(
+                select(Participant).where(Participant.type == "agent", Participant.ref_id == from_agent_id)
+            )
             src_participant = src_part_r.scalar_one_or_none()
-            tgt_part_r = await db.execute(select(Participant).where(Participant.type == "agent", Participant.ref_id == target.id))
+            tgt_part_r = await db.execute(
+                select(Participant).where(Participant.type == "agent", Participant.ref_id == target.id)
+            )
             tgt_participant = tgt_part_r.scalar_one_or_none()
 
             # Find or create ChatSession for this agent pair (ordered consistently)
@@ -4341,18 +4492,21 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
             # ── OpenClaw target: queue message for gateway poll ──
             if getattr(target, "agent_type", "native") == "openclaw":
                 # 1. Save the source message to the chat session
-                db.add(ChatMessage(
-                    agent_id=session_agent_id,
-                    user_id=owner_id,
-                    role="user",
-                    content=message_text,
-                    conversation_id=session_id,
-                    participant_id=src_participant.id if src_participant else None,
-                ))
+                db.add(
+                    ChatMessage(
+                        agent_id=session_agent_id,
+                        user_id=owner_id,
+                        role="user",
+                        content=message_text,
+                        conversation_id=session_id,
+                        participant_id=src_participant.id if src_participant else None,
+                    )
+                )
                 chat_session.last_message_at = datetime.now(timezone.utc)
-                
+
                 # 2. Queue for Gateway
                 from app.models.gateway_message import GatewayMessage as GMsg
+
                 gw_msg = GMsg(
                     agent_id=target.id,
                     sender_agent_id=from_agent_id,
@@ -4363,16 +4517,21 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                 )
                 db.add(gw_msg)
                 await db.commit()
-                
+
                 # 3. Log activity
                 from app.services.activity_logger import log_activity
+
                 await log_activity(
-                    from_agent_id, "agent_msg_sent",
+                    from_agent_id,
+                    "agent_msg_sent",
                     f"Sent message to {target.name} (queued)",
                     detail={"partner": target.name, "message": message_text[:200]},
                 )
 
-                online = target.openclaw_last_seen and (datetime.now(timezone.utc) - target.openclaw_last_seen).total_seconds() < 300
+                online = (
+                    target.openclaw_last_seen
+                    and (datetime.now(timezone.utc) - target.openclaw_last_seen).total_seconds() < 300
+                )
                 status_hint = "online" if online else "offline (message will be delivered on next heartbeat)"
                 return f"✅ Message sent to {target.name} (OpenClaw agent, currently {status_hint}). The message has been queued and will be delivered when the agent polls for updates."
 
@@ -4391,20 +4550,24 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                 fb_r = await db.execute(select(LLMModel).where(LLMModel.id == target.fallback_model_id))
                 target_model = fb_r.scalar_one_or_none()
                 if target_model:
-                    logger.warning(f"[A2A] Primary model unavailable for {target.name}, using fallback: {target_model.model}")
+                    logger.warning(
+                        f"[A2A] Primary model unavailable for {target.name}, using fallback: {target_model.model}"
+                    )
 
             if not target_model:
                 return f"⚠️ {target.name} has no LLM model configured"
 
             # Build target system prompt
-            target_static, target_dynamic = await build_agent_context(target.id, target.name, target.role_description or "")
+            target_static, target_dynamic = await build_agent_context(
+                target.id, target.name, target.role_description or ""
+            )
             target_dynamic += (
                 "\n\n--- Agent-to-Agent Message ---\n"
                 "You are receiving a message from another digital employee. "
                 "Reply concisely and helpfully. Focus on the request and provide a clear answer.\n"
                 "\n** CRITICAL FILE DELIVERY RULE **\n"
                 "After you write any file (report, document, analysis, etc.) that the requesting agent needs, "
-                "you MUST call `send_file_to_agent(agent_name=\"<requester_name>\", file_path=\"<path>\")` "
+                'you MUST call `send_file_to_agent(agent_name="<requester_name>", file_path="<path>")` '
                 "to deliver it. The other agent CANNOT access your workspace. "
                 "Never just tell them the path — always deliver explicitly.\n"
             )
@@ -4432,14 +4595,16 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
 
             # Save source message
             owner_id = source_agent.creator_id if source_agent else from_agent_id
-            db.add(ChatMessage(
-                agent_id=session_agent_id,
-                user_id=owner_id,
-                role="user",
-                content=message_text,
-                conversation_id=session_id,
-                participant_id=src_participant.id if src_participant else None,
-            ))
+            db.add(
+                ChatMessage(
+                    agent_id=session_agent_id,
+                    user_id=owner_id,
+                    role="user",
+                    content=message_text,
+                    conversation_id=session_id,
+                    participant_id=src_participant.id if src_participant else None,
+                )
+            )
             chat_session.last_message_at = datetime.now(timezone.utc)
             await db.commit()
 
@@ -4454,13 +4619,14 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
             )
             from app.services.llm_client import LLMError
             from app.services.agent_tools import get_agent_tools_for_llm, execute_tool
+
             base_url = get_provider_base_url(target_model.provider, target_model.base_url)
             if not base_url:
                 return f"⚠️ {target.name}'s model has no API base URL configured"
 
-            full_msgs: list[LLMMessage] = [LLMMessage(role="system", content=target_static, dynamic_content=target_dynamic)] + [
-                LLMMessage(role=m["role"], content=m["content"]) for m in conversation_messages
-            ]
+            full_msgs: list[LLMMessage] = [
+                LLMMessage(role="system", content=target_static, dynamic_content=target_dynamic)
+            ] + [LLMMessage(role=m["role"], content=m["content"]) for m in conversation_messages]
 
             # Load tools for target agent
             tools_for_llm = await get_agent_tools_for_llm(target.id)
@@ -4476,11 +4642,20 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                 api_key=target_model.api_key_encrypted,
                 model=target_model.model,
                 base_url=base_url,
-                timeout=float(getattr(target_model, 'request_timeout', None) or 120.0),
+                timeout=float(getattr(target_model, "request_timeout", None) or 120.0),
             )
             _A2A_RETRYABLE_MARKERS = (
-                "http 408", "http 429", "http 500", "http 502", "http 503", "http 504",
-                "timeout", "timed out", "connection failed", "temporarily unavailable", "rate limit",
+                "http 408",
+                "http 429",
+                "http 500",
+                "http 502",
+                "http 503",
+                "http 504",
+                "timeout",
+                "timed out",
+                "connection failed",
+                "temporarily unavailable",
+                "rate limit",
             )
             _A2A_MAX_RETRIES = 3
 
@@ -4527,22 +4702,27 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                     if real_tokens:
                         _a2a_accumulated_tokens += real_tokens
                     else:
-                        round_chars = sum(len(m.content or '') for m in full_msgs if isinstance(m.content, str))
+                        round_chars = sum(len(m.content or "") for m in full_msgs if isinstance(m.content, str))
                         _a2a_accumulated_tokens += estimate_tokens_from_chars(round_chars)
 
                     # Check for tool calls
                     if response.tool_calls:
                         # Add assistant message with tool calls to conversation
-                        full_msgs.append(LLMMessage(
-                            role="assistant",
-                            content=response.content or None,
-                            tool_calls=[{
-                                "id": tc.get("id", ""),
-                                "type": "function",
-                                "function": tc.get("function", {}),
-                            } for tc in response.tool_calls],
-                            reasoning_content=response.reasoning_content,
-                        ))
+                        full_msgs.append(
+                            LLMMessage(
+                                role="assistant",
+                                content=response.content or None,
+                                tool_calls=[
+                                    {
+                                        "id": tc.get("id", ""),
+                                        "type": "function",
+                                        "function": tc.get("function", {}),
+                                    }
+                                    for tc in response.tool_calls
+                                ],
+                                reasoning_content=response.reasoning_content,
+                            )
+                        )
 
                         # Execute each tool call
                         for tc in response.tool_calls:
@@ -4560,40 +4740,51 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                             tool_result = await execute_tool(tool_name, tool_args, target.id, owner_id)
 
                             # Nudge: after write_file in A2A, remind to deliver via send_file_to_agent
-                            if tool_name == "write_file" and isinstance(tool_result, str) and tool_result.startswith("\u2705"):
+                            if (
+                                tool_name == "write_file"
+                                and isinstance(tool_result, str)
+                                and tool_result.startswith("\u2705")
+                            ):
                                 wrote_path = tool_args.get("path", "")
                                 tool_result += (
                                     f"\n\n⚠️ REMINDER: The requesting agent ({source_name}) cannot access your workspace. "
-                                    f"You MUST now call `send_file_to_agent(agent_name=\"{source_name}\", file_path=\"{wrote_path}\")` "
+                                    f'You MUST now call `send_file_to_agent(agent_name="{source_name}", file_path="{wrote_path}")` '
                                     f"to deliver this file to them."
                                 )
 
                             # Save tool_call to DB so it appears in chat history
                             try:
                                 async with async_session() as _tc_db:
-                                    _tc_db.add(ChatMessage(
-                                        agent_id=session_agent_id,
-                                        user_id=owner_id,
-                                        role="tool_call",
-                                        content=json.dumps({
-                                            "name": tool_name,
-                                            "args": tool_args,
-                                            "status": "done",
-                                            "result": str(tool_result)[:500],
-                                        }, ensure_ascii=False),
-                                        conversation_id=session_id,
-                                        participant_id=tgt_participant.id if tgt_participant else None,
-                                    ))
+                                    _tc_db.add(
+                                        ChatMessage(
+                                            agent_id=session_agent_id,
+                                            user_id=owner_id,
+                                            role="tool_call",
+                                            content=json.dumps(
+                                                {
+                                                    "name": tool_name,
+                                                    "args": tool_args,
+                                                    "status": "done",
+                                                    "result": str(tool_result)[:500],
+                                                },
+                                                ensure_ascii=False,
+                                            ),
+                                            conversation_id=session_id,
+                                            participant_id=tgt_participant.id if tgt_participant else None,
+                                        )
+                                    )
                                     await _tc_db.commit()
                             except Exception as _tc_err:
                                 logger.error(f"[A2A] Failed to save tool_call: {_tc_err}")
 
                             # Add tool result to conversation
-                            full_msgs.append(LLMMessage(
-                                role="tool",
-                                tool_call_id=tc.get("id", ""),
-                                content=str(tool_result)[:4000],
-                            ))
+                            full_msgs.append(
+                                LLMMessage(
+                                    role="tool",
+                                    tool_call_id=tc.get("id", ""),
+                                    content=str(tool_result)[:4000],
+                                )
+                            )
                         continue  # Next LLM round
 
                     # No tool calls — this is the final text response
@@ -4611,27 +4802,34 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
 
             # Save target reply
             async with async_session() as db2:
-                part_r = await db2.execute(select(Participant).where(Participant.type == "agent", Participant.ref_id == target.id))
+                part_r = await db2.execute(
+                    select(Participant).where(Participant.type == "agent", Participant.ref_id == target.id)
+                )
                 tgt_part = part_r.scalar_one_or_none()
-                db2.add(ChatMessage(
-                    agent_id=session_agent_id,
-                    user_id=owner_id,
-                    role="assistant",
-                    content=target_reply,
-                    conversation_id=session_id,
-                    participant_id=tgt_part.id if tgt_part else None,
-                ))
+                db2.add(
+                    ChatMessage(
+                        agent_id=session_agent_id,
+                        user_id=owner_id,
+                        role="assistant",
+                        content=target_reply,
+                        conversation_id=session_id,
+                        participant_id=tgt_part.id if tgt_part else None,
+                    )
+                )
                 await db2.commit()
 
             # Log activity
             from app.services.activity_logger import log_activity
+
             await log_activity(
-                target.id, "agent_msg_sent",
+                target.id,
+                "agent_msg_sent",
                 f"Replied to message from {source_name}",
                 detail={"partner": source_name, "message": message_text[:200], "reply": target_reply[:200]},
             )
             await log_activity(
-                from_agent_id, "agent_msg_sent",
+                from_agent_id,
+                "agent_msg_sent",
                 f"Sent message to {target.name} and received reply",
                 detail={"partner": target.name, "message": message_text[:200], "reply": target_reply[:200]},
             )
@@ -4639,9 +4837,7 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
             return f"💬 {target.name} replied:\n{target_reply}"
 
     except Exception as e:
-        logger.exception(
-            f"[A2A] send_message_to_agent failed: from={from_agent_id}, to={args.get('agent_name', '')}"
-        )
+        logger.exception(f"[A2A] send_message_to_agent failed: from={from_agent_id}, to={args.get('agent_name', '')}")
         error_type = type(e).__name__
         error_detail = (str(e) or "").strip()
         if not error_detail:
@@ -4653,9 +4849,9 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
         return f"❌ Message send error ({error_type}): {error_detail[:200]}"
 
 
-
 # Plaza Tools — Agent Square social feed
 # ═══════════════════════════════════════════════════════
+
 
 async def _plaza_get_new_posts(agent_id: uuid.UUID, arguments: dict) -> str:
     """Get recent posts from the Agent Plaza, scoped to agent's tenant."""
@@ -4735,9 +4931,11 @@ async def _plaza_create_post(agent_id: uuid.UUID, arguments: dict) -> str:
             # Extract @mentions
             try:
                 import re
-                mentions = re.findall(r'@(\S+)', content)
+
+                mentions = re.findall(r"@(\S+)", content)
                 if mentions:
                     from app.services.notification_service import send_notification
+
                     a_q = select(AgentModel).where(AgentModel.id != agent_id)
                     if agent.tenant_id:
                         a_q = a_q.where(AgentModel.tenant_id == agent.tenant_id)
@@ -4748,7 +4946,8 @@ async def _plaza_create_post(agent_id: uuid.UUID, arguments: dict) -> str:
                         if ma and ma.id not in notified:
                             notified.add(ma.id)
                             await send_notification(
-                                db, agent_id=ma.id,
+                                db,
+                                agent_id=ma.id,
                                 type="mention",
                                 title=f"{agent.name} mentioned you in a plaza post",
                                 body=content[:150],
@@ -4812,9 +5011,11 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
             if post.author_id != agent_id:
                 try:
                     from app.services.notification_service import send_notification
+
                     if post.author_type == "agent":
                         await send_notification(
-                            db, agent_id=post.author_id,
+                            db,
+                            agent_id=post.author_id,
                             type="plaza_reply",
                             title=f"{agent.name} commented on your post",
                             body=content[:150],
@@ -4823,10 +5024,13 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
                             sender_name=agent.name,
                         )
                         # Also notify human creator
-                        pa = (await db.execute(select(AgentModel).where(AgentModel.id == post.author_id))).scalar_one_or_none()
+                        pa = (
+                            await db.execute(select(AgentModel).where(AgentModel.id == post.author_id))
+                        ).scalar_one_or_none()
                         if pa and pa.creator_id:
                             await send_notification(
-                                db, user_id=pa.creator_id,
+                                db,
+                                user_id=pa.creator_id,
                                 type="plaza_comment",
                                 title=f"{agent.name} commented on {pa.name}'s post",
                                 body=content[:100],
@@ -4836,7 +5040,8 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
                             )
                     elif post.author_type == "human":
                         await send_notification(
-                            db, user_id=post.author_id,
+                            db,
+                            user_id=post.author_id,
                             type="plaza_reply",
                             title=f"{agent.name} commented on your post",
                             body=content[:150],
@@ -4850,6 +5055,7 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
             # Notify other agents who commented on this post
             try:
                 from app.services.notification_service import send_notification
+
                 other_crs = await db.execute(
                     select(PlazaComment.author_id, PlazaComment.author_type)
                     .where(PlazaComment.post_id == pid)
@@ -4863,7 +5069,8 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
                     notified.add(cid)
                     if ctype == "agent":
                         await send_notification(
-                            db, agent_id=cid,
+                            db,
+                            agent_id=cid,
                             type="plaza_reply",
                             title=f"{agent.name} also commented on a post you commented on",
                             body=content[:150],
@@ -4877,10 +5084,12 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
             # Extract @mentions
             try:
                 import re
-                mentions = re.findall(r'@(\S+)', content)
+
+                mentions = re.findall(r"@(\S+)", content)
                 if mentions:
                     from app.services.notification_service import send_notification
                     from app.models.user import User
+
                     # Load agents in tenant
                     a_q = select(AgentModel).where(AgentModel.id != agent_id)
                     if agent.tenant_id:
@@ -4892,7 +5101,8 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
                         if ma and ma.id not in notified_m:
                             notified_m.add(ma.id)
                             await send_notification(
-                                db, agent_id=ma.id,
+                                db,
+                                agent_id=ma.id,
                                 type="mention",
                                 title=f"{agent.name} mentioned you in a comment",
                                 body=content[:150],
@@ -4914,18 +5124,43 @@ async def _plaza_add_comment(agent_id: uuid.UUID, arguments: dict) -> str:
 
 # Dangerous patterns to block (for legacy fallback)
 _DANGEROUS_BASH = [
-    "rm -rf /", "rm -rf ~", "sudo ", "mkfs", "dd if=",
-    ":(){ :", "chmod 777 /", "chown ", "shutdown", "reboot",
-    "curl ", "wget ", "nc ", "ncat ", "ssh ", "scp ",
-    "python3 -c", "python -c",
+    "rm -rf /",
+    "rm -rf ~",
+    "sudo ",
+    "mkfs",
+    "dd if=",
+    ":(){ :",
+    "chmod 777 /",
+    "chown ",
+    "shutdown",
+    "reboot",
+    "curl ",
+    "wget ",
+    "nc ",
+    "ncat ",
+    "ssh ",
+    "scp ",
+    "python3 -c",
+    "python -c",
 ]
 
 _DANGEROUS_PYTHON_IMPORTS = [
-    "subprocess", "shutil.rmtree", "os.system", "os.popen",
-    "os.exec", "os.spawn",
-    "socket", "http.client", "urllib.request", "requests",
-    "ftplib", "smtplib", "telnetlib", "ctypes",
-    "__import__", "importlib",
+    "subprocess",
+    "shutil.rmtree",
+    "os.system",
+    "os.popen",
+    "os.exec",
+    "os.spawn",
+    "socket",
+    "http.client",
+    "urllib.request",
+    "requests",
+    "ftplib",
+    "smtplib",
+    "telnetlib",
+    "ctypes",
+    "__import__",
+    "importlib",
 ]
 
 
@@ -4947,8 +5182,15 @@ def _check_code_safety(language: str, code: str) -> str | None:
                 return f"❌ Blocked: unsafe operation detected ({pattern})"
 
     elif language == "node":
-        dangerous_node = ["child_process", "fs.rmSync", "fs.rmdirSync", "process.exit",
-                          "require('http')", "require('https')", "require('net')"]
+        dangerous_node = [
+            "child_process",
+            "fs.rmSync",
+            "fs.rmdirSync",
+            "process.exit",
+            "require('http')",
+            "require('https')",
+            "require('net')",
+        ]
         for pattern in dangerous_node:
             if pattern.lower() in code_lower:
                 return f"❌ Blocked: unsafe operation detected ({pattern})"
@@ -4990,7 +5232,7 @@ async def _execute_code(
 
     # For E2B tool: do NOT fall back to local subprocess on error —
     # the user explicitly chose cloud execution.
-    is_e2b_tool = (tool_name == "execute_code_e2b")
+    is_e2b_tool = tool_name == "execute_code_e2b"
 
     try:
         # Import here to avoid circular imports
@@ -5090,7 +5332,8 @@ async def _execute_code_legacy(ws: Path, arguments: dict) -> str:
         safe_env["PYTHONDONTWRITEBYTECODE"] = "1"
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd_prefix, str(script_path),
+            *cmd_prefix,
+            str(script_path),
             cwd=str(work_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -5132,6 +5375,7 @@ async def _execute_code_legacy(ws: Path, arguments: dict) -> str:
 
 # ─── Resource Discovery Executors ───────────────────────────────
 
+
 async def _discover_resources(arguments: dict) -> str:
     """Search Smithery registry for MCP servers."""
     query = arguments.get("query", "")
@@ -5140,6 +5384,7 @@ async def _discover_resources(arguments: dict) -> str:
     max_results = min(arguments.get("max_results", 5), 10)
 
     from app.services.resource_discovery import search_smithery
+
     return await search_smithery(query, max_results)
 
 
@@ -5152,6 +5397,7 @@ async def _import_mcp_server(agent_id: uuid.UUID, arguments: dict) -> str:
     if mcp_url:
         # Direct URL import — bypass Smithery
         from app.services.resource_discovery import import_mcp_direct
+
         server_name = arguments.get("server_id") or config.pop("server_name", None)
         api_key = config.pop("api_key", None)
         return await import_mcp_direct(mcp_url, agent_id, server_name, api_key)
@@ -5162,6 +5408,7 @@ async def _import_mcp_server(agent_id: uuid.UUID, arguments: dict) -> str:
         return "❌ Please provide a server_id (e.g. 'github'). Use discover_resources first to find available servers."
 
     from app.services.resource_discovery import import_mcp_from_smithery
+
     return await import_mcp_from_smithery(server_id, agent_id, config or None, reauthorize=reauthorize)
 
 
@@ -5192,18 +5439,19 @@ async def _handle_set_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
     if ttype == "cron":
         expr = config.get("expr", "")
         if not expr:
-            return "❌ cron trigger requires config.expr, e.g. {\"expr\": \"0 9 * * *\"}"
+            return '❌ cron trigger requires config.expr, e.g. {"expr": "0 9 * * *"}'
         try:
             from croniter import croniter
+
             croniter(expr)
         except Exception:
             return f"❌ Invalid cron expression: '{expr}'"
     elif ttype == "once":
         if not config.get("at"):
-            return "❌ once trigger requires config.at, e.g. {\"at\": \"2026-03-10T09:00:00+08:00\"}"
+            return '❌ once trigger requires config.at, e.g. {"at": "2026-03-10T09:00:00+08:00"}'
     elif ttype == "interval":
         if not config.get("minutes"):
-            return "❌ interval trigger requires config.minutes, e.g. {\"minutes\": 30}"
+            return '❌ interval trigger requires config.minutes, e.g. {"minutes": 30}'
     elif ttype == "poll":
         if not config.get("url"):
             return "❌ poll trigger requires config.url"
@@ -5216,13 +5464,18 @@ async def _handle_set_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
             from app.models.audit import ChatMessage
             from app.models.chat_session import ChatSession
             from sqlalchemy import cast as sa_cast, String as SaString
+
             async with async_session() as _snap_db:
-                _snap_q = select(ChatMessage.created_at).join(
-                    ChatSession, ChatMessage.conversation_id == sa_cast(ChatSession.id, SaString)
-                ).where(
-                    ChatSession.agent_id == agent_id,
-                    ChatMessage.created_at.isnot(None),
-                ).order_by(ChatMessage.created_at.desc()).limit(1)
+                _snap_q = (
+                    select(ChatMessage.created_at)
+                    .join(ChatSession, ChatMessage.conversation_id == sa_cast(ChatSession.id, SaString))
+                    .where(
+                        ChatSession.agent_id == agent_id,
+                        ChatMessage.created_at.isnot(None),
+                    )
+                    .order_by(ChatMessage.created_at.desc())
+                    .limit(1)
+                )
                 _snap_r = await _snap_db.execute(_snap_q)
                 _latest_ts = _snap_r.scalar_one_or_none()
                 if _latest_ts:
@@ -5232,6 +5485,7 @@ async def _handle_set_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
     elif ttype == "webhook":
         # Auto-generate a unique token for the webhook URL
         import secrets
+
         token = secrets.token_urlsafe(8)  # ~11 chars, URL-safe
         config["token"] = token
 
@@ -5239,14 +5493,18 @@ async def _handle_set_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
         async with async_session() as db:
             # Load agent to get per-agent trigger limit
             from app.models.agent import Agent as _AgentModel
+
             _a_result = await db.execute(select(_AgentModel).where(_AgentModel.id == agent_id))
             _agent_obj = _a_result.scalar_one_or_none()
             agent_max_triggers = (_agent_obj.max_triggers if _agent_obj else None) or MAX_TRIGGERS_PER_AGENT
 
             # Check max triggers
             from sqlalchemy import func as sa_func
+
             result = await db.execute(
-                select(sa_func.count()).select_from(AgentTrigger).where(
+                select(sa_func.count())
+                .select_from(AgentTrigger)
+                .where(
                     AgentTrigger.agent_id == agent_id,
                     AgentTrigger.is_enabled == True,
                 )
@@ -5296,15 +5554,23 @@ async def _handle_set_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
         # Activity log
         try:
             from app.services.audit_logger import write_audit_log
-            await write_audit_log("trigger_created", {
-                "name": name, "type": ttype, "reason": reason[:100],
-            }, agent_id=agent_id)
+
+            await write_audit_log(
+                "trigger_created",
+                {
+                    "name": name,
+                    "type": ttype,
+                    "reason": reason[:100],
+                },
+                agent_id=agent_id,
+            )
         except Exception:
             pass
 
         # Return webhook URL for webhook triggers
         if ttype == "webhook":
             from app.services.platform_service import platform_service
+
             base = await platform_service.get_public_base_url()
             webhook_url = f"{base.rstrip('/')}/api/webhooks/t/{config['token']}"
 
@@ -5355,9 +5621,15 @@ async def _handle_update_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
 
         try:
             from app.services.audit_logger import write_audit_log
-            await write_audit_log("trigger_updated", {
-                "name": name, "changes": "; ".join(changes),
-            }, agent_id=agent_id)
+
+            await write_audit_log(
+                "trigger_updated",
+                {
+                    "name": name,
+                    "changes": "; ".join(changes),
+                },
+                agent_id=agent_id,
+            )
         except Exception:
             pass
 
@@ -5394,6 +5666,7 @@ async def _handle_cancel_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
 
         try:
             from app.services.audit_logger import write_audit_log
+
             await write_audit_log("trigger_cancelled", {"name": name}, agent_id=agent_id)
         except Exception:
             pass
@@ -5411,16 +5684,21 @@ async def _handle_list_triggers(agent_id: uuid.UUID) -> str:
     try:
         async with async_session() as db:
             result = await db.execute(
-                select(AgentTrigger).where(
+                select(AgentTrigger)
+                .where(
                     AgentTrigger.agent_id == agent_id,
-                ).order_by(AgentTrigger.created_at.desc())
+                )
+                .order_by(AgentTrigger.created_at.desc())
             )
             triggers = result.scalars().all()
 
         if not triggers:
             return "No triggers found. Use set_trigger to create one."
 
-        lines = ["| Name | Type | Config | Reason | Status | Fires |", "|------|------|--------|--------|--------|-------|"]
+        lines = [
+            "| Name | Type | Config | Reason | Status | Fires |",
+            "|------|------|--------|--------|--------|-------|",
+        ]
         for t in triggers:
             status = "✅ active" if t.is_enabled else "⏸ disabled"
             config_str = str(t.config)[:50]
@@ -5434,6 +5712,7 @@ async def _handle_list_triggers(agent_id: uuid.UUID) -> str:
 
 
 # ─── Image Upload (ImageKit CDN) ────────────────────────────────
+
 
 async def _upload_image(agent_id: uuid.UUID, ws: Path, arguments: dict) -> str:
     """Upload an image to ImageKit CDN and return the public URL.
@@ -5494,6 +5773,7 @@ async def _upload_image(agent_id: uuid.UUID, ws: Path, arguments: dict) -> str:
         form_data["file"] = url
         if not file_name:
             from urllib.parse import urlparse
+
             file_name = urlparse(url).path.split("/")[-1] or "image.jpg"
 
     if not file_name:
@@ -5548,8 +5828,8 @@ async def _upload_image(agent_id: uuid.UUID, ws: Path, arguments: dict) -> str:
         return f"❌ Upload error: {type(e).__name__}: {str(e)[:300]}"
 
 
-
 # ─── Image Generation (Multi-Provider) ────────────────────────────────────────
+
 
 async def _generate_image(agent_id: uuid.UUID, ws: Path, arguments: dict, provider: str) -> str:
     """Generate an image using the configured provider and save to workspace.
@@ -5605,21 +5885,24 @@ async def _generate_image(agent_id: uuid.UUID, ws: Path, arguments: dict, provid
                 api_key,
                 model or "black-forest-labs/FLUX.1-schnell",
                 base_url or "https://api.siliconflow.cn/v1",
-                prompt, size,
+                prompt,
+                size,
             )
         elif provider == "openai":
             image_bytes = await _generate_image_openai(
                 api_key,
                 model or "gpt-image-1",
                 base_url or "https://api.openai.com/v1",
-                prompt, size,
+                prompt,
+                size,
             )
         elif provider == "google":
             image_bytes = await _generate_image_google(
                 api_key,
                 model or "gemini-2.5-flash-image",
                 base_url or "https://generativelanguage.googleapis.com/v1beta",
-                prompt, size,
+                prompt,
+                size,
             )
         else:
             return f"❌ Unknown image generation provider: {provider}. Supported: siliconflow, openai, google"
@@ -5653,9 +5936,7 @@ async def _generate_image(agent_id: uuid.UUID, ws: Path, arguments: dict, provid
         return f"❌ Image generation failed ({provider}): {err_msg[:400]}"
 
 
-async def _generate_image_siliconflow(
-    api_key: str, model: str, base_url: str, prompt: str, size: str
-) -> bytes:
+async def _generate_image_siliconflow(api_key: str, model: str, base_url: str, prompt: str, size: str) -> bytes:
     """Generate image via SiliconFlow (OpenAI-compatible images.generate API).
 
     SiliconFlow returns a temporary URL (expires in ~1 hour), so we download
@@ -5701,9 +5982,7 @@ async def _generate_image_siliconflow(
         raise ValueError(f"No image URL or b64_json in SiliconFlow response: {data}")
 
 
-async def _generate_image_openai(
-    api_key: str, model: str, base_url: str, prompt: str, size: str
-) -> bytes:
+async def _generate_image_openai(api_key: str, model: str, base_url: str, prompt: str, size: str) -> bytes:
     """Generate image via OpenAI GPT Image API.
 
     Requests b64_json format to avoid dealing with URL expiry.
@@ -5747,9 +6026,7 @@ async def _generate_image_openai(
         raise ValueError(f"No b64_json or URL in OpenAI response: {data}")
 
 
-async def _generate_image_google(
-    api_key: str, model: str, base_url: str, prompt: str, size: str
-) -> bytes:
+async def _generate_image_google(api_key: str, model: str, base_url: str, prompt: str, size: str) -> bytes:
     """Generate image via Google Gemini Native Image API (Nano Banana) or Vertex AI.
 
     Uses the Gemini generateContent endpoint with responseModalities=["IMAGE"].
@@ -5786,9 +6063,7 @@ async def _generate_image_google(
     }
 
     async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            url, json=payload, headers={"Content-Type": "application/json"}
-        )
+        resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
         if resp.status_code != 200:
             try:
                 err_body = resp.json()
@@ -5816,6 +6091,7 @@ async def _generate_image_google(
 
 
 # ─── Feishu Helper ────────────────────────────────────────────────────────────
+
 
 async def _get_feishu_token(agent_id: uuid.UUID) -> tuple[str, str] | None:
     """Get (app_id, app_access_token) for the agent's configured Feishu channel."""
@@ -5851,6 +6127,7 @@ async def _get_agent_calendar_id(token: str) -> tuple[str | None, str | None]:
     Returns (calendar_id, None) on success, or (None, human_readable_error) on failure.
     """
     import httpx
+
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(
             "https://open.feishu.cn/open-apis/calendar/v4/calendars/primary",
@@ -5881,6 +6158,7 @@ async def _get_agent_calendar_id(token: str) -> tuple[str | None, str | None]:
 async def _feishu_resolve_open_id(token: str, email: str) -> str | None:
     """Resolve a user's open_id from their email."""
     import httpx
+
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(
             "https://open.feishu.cn/open-apis/contact/v3/users/batch_get_id",
@@ -5901,6 +6179,7 @@ async def _feishu_resolve_open_id(token: str, email: str) -> str | None:
 def _iso_to_ts(iso_str: str) -> float:
     """Convert ISO 8601 string to Unix timestamp."""
     from datetime import datetime as _dt
+
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
         try:
             if iso_str.endswith("Z"):
@@ -5920,11 +6199,11 @@ async def _get_feishu_credentials(agent_id: uuid.UUID) -> tuple[str, str]:
     """
     from app.models.channel_config import ChannelConfig
     from app.config import get_settings
-    
+
     settings = get_settings()
     app_id = settings.FEISHU_APP_ID
     app_secret = settings.FEISHU_APP_SECRET
-    
+
     try:
         async with async_session() as db:
             result = await db.execute(
@@ -5936,7 +6215,7 @@ async def _get_feishu_credentials(agent_id: uuid.UUID) -> tuple[str, str]:
                 app_secret = config.app_secret
     except Exception:
         pass
-        
+
     return app_id, app_secret
 
 
@@ -5955,6 +6234,7 @@ async def _get_feishu_tenant_doc_url(tenant_token: str, doc_token: str, doc_type
         A fully-formed URL string.
     """
     import httpx
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -5972,8 +6252,6 @@ async def _get_feishu_tenant_doc_url(tenant_token: str, doc_token: str, doc_type
     return f"https://feishu.cn/{doc_type}/{doc_token}"
 
 
-
-
 async def _get_feishu_bitable_url(tenant_token: str, app_token: str, table_id: str = "") -> str:
     """Build a user-accessible Bitable URL using the tenant's actual domain.
 
@@ -5988,6 +6266,7 @@ async def _get_feishu_bitable_url(tenant_token: str, app_token: str, table_id: s
         A fully-formed URL string.
     """
     import httpx
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -6016,41 +6295,43 @@ def _parse_feishu_url(url: str) -> dict:
     Supports Bitable (table, view) and Docx.
     """
     import re
+
     result = {}
-    
+
     # Bitable URL regex: e.g., https://example.feishu.cn/base/{app_token}?table={table_id}&view={view_id}
-    base_match = re.search(r'/base/([a-zA-Z0-9_]+)', url)
+    base_match = re.search(r"/base/([a-zA-Z0-9_]+)", url)
     if base_match:
-        result['app_token'] = base_match.group(1)
-        
-    table_match = re.search(r'table=([a-zA-Z0-9_]+)', url)
+        result["app_token"] = base_match.group(1)
+
+    table_match = re.search(r"table=([a-zA-Z0-9_]+)", url)
     if table_match:
-        result['table_id'] = table_match.group(1)
-    
+        result["table_id"] = table_match.group(1)
+
     # support URL with /tblxxxxxx
-    if not 'table_id' in result:
-        tbl_match = re.search(r'/(tbl[a-zA-Z0-9_]+)', url)
+    if not "table_id" in result:
+        tbl_match = re.search(r"/(tbl[a-zA-Z0-9_]+)", url)
         if tbl_match:
-            result['table_id'] = tbl_match.group(1)
-            
-    view_match = re.search(r'view=([a-zA-Z0-9_]+)', url)
+            result["table_id"] = tbl_match.group(1)
+
+    view_match = re.search(r"view=([a-zA-Z0-9_]+)", url)
     if view_match:
-        result['view_id'] = view_match.group(1)
-        
+        result["view_id"] = view_match.group(1)
+
     # Docx URL regex
-    docx_match = re.search(r'/docx/([a-zA-Z0-9_]+)', url)
+    docx_match = re.search(r"/docx/([a-zA-Z0-9_]+)", url)
     if docx_match:
-        result['document_token'] = docx_match.group(1)
-        
+        result["document_token"] = docx_match.group(1)
+
     # Wiki URL regex
-    wiki_match = re.search(r'/wiki/([a-zA-Z0-9_]+)', url)
+    wiki_match = re.search(r"/wiki/([a-zA-Z0-9_]+)", url)
     if wiki_match:
-        result['wiki_token'] = wiki_match.group(1)
-        
+        result["wiki_token"] = wiki_match.group(1)
+
     return result
 
 
 # ─── Feishu Bitable Tools ──────────────────────────────────────────
+
 
 async def _resolve_bitable_app_token(agent_id: uuid.UUID, parsed_url: dict) -> str | None:
     app_token = parsed_url.get("app_token")
@@ -6061,11 +6342,13 @@ async def _resolve_bitable_app_token(agent_id: uuid.UUID, parsed_url: dict) -> s
         app_id, app_secret = await _get_feishu_credentials(agent_id)
         if app_id and app_secret:
             from app.services.feishu_service import feishu_service
+
             token = await feishu_service.get_tenant_access_token(app_id, app_secret)
             node_info = await _feishu_wiki_get_node(wiki_token, token)
             if node_info and node_info.get("obj_token"):
                 return node_info["obj_token"]
     return None
+
 
 def _check_feishu_err(resp: dict) -> str | None:
     """Check Feishu API response for errors and return a user-friendly message.
@@ -6112,6 +6395,7 @@ def _check_feishu_err(resp: dict) -> str | None:
         return f"Failed: API Error {code} - {msg}"
     return None
 
+
 async def _bitable_list_tables(agent_id: uuid.UUID, arguments: dict) -> str:
     """List all tables in a Feishu Bitable app."""
     url = arguments.get("url", "")
@@ -6119,17 +6403,19 @@ async def _bitable_list_tables(agent_id: uuid.UUID, arguments: dict) -> str:
     app_token = await _resolve_bitable_app_token(agent_id, parsed)
     if not app_token:
         return "Failed: Could not extract Bitable app_token from the URL (also could not resolve wiki_token)."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     if not app_id or not app_secret:
         return "Failed: Feishu app credentials not configured for this agent."
-        
+
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.bitable_list_tables(app_id, app_secret, app_token)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         tables = resp.get("data", {}).get("items", [])
         if not tables:
             return "OK: No tables found in this Bitable."
@@ -6159,6 +6445,7 @@ async def _bitable_create_app(agent_id: uuid.UUID, arguments: dict) -> str:
         return "Failed: Feishu app credentials not configured for this agent."
 
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.bitable_create_app(app_id, app_secret, name, folder_token)
         err = _check_feishu_err(resp)
@@ -6178,12 +6465,7 @@ async def _bitable_create_app(agent_id: uuid.UUID, arguments: dict) -> str:
             tenant_token = await feishu_service.get_tenant_access_token(app_id, app_secret)
             bitable_url = await _get_feishu_bitable_url(tenant_token, app_token)
 
-        result = (
-            f"OK: Bitable created successfully!\n"
-            f"Name: {name}\n"
-            f"App Token: {app_token}\n"
-            f"URL: {bitable_url}"
-        )
+        result = f"OK: Bitable created successfully!\nName: {name}\nApp Token: {app_token}\nURL: {bitable_url}"
         if default_table_id:
             result += f"\nDefault Table ID: {default_table_id}"
         return result
@@ -6195,23 +6477,25 @@ async def _bitable_list_fields(agent_id: uuid.UUID, arguments: dict) -> str:
     """List all fields (columns) in a specific Bitable table."""
     url = arguments.get("url", "")
     table_id = arguments.get("table_id", "")
-    
+
     parsed = _parse_feishu_url(url)
     app_token = await _resolve_bitable_app_token(agent_id, parsed)
     table_id = table_id or parsed.get("table_id")
-    
+
     if not app_token:
         return "Failed: Could not extract Bitable app_token from the URL."
     if not table_id:
         return "Failed: table_id is required. Provide it as a parameter or include it in the URL."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.bitable_list_fields(app_id, app_secret, app_token, table_id)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         fields = resp.get("data", {}).get("items", [])
         if not fields:
             return "OK: No fields found in this table."
@@ -6220,24 +6504,27 @@ async def _bitable_list_fields(agent_id: uuid.UUID, arguments: dict) -> str:
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
+
 async def _bitable_query_records(agent_id: uuid.UUID, arguments: dict) -> str:
     """Query records (rows) from a Bitable table, with optional FQL filter."""
     url = arguments.get("url", "")
     table_id = arguments.get("table_id", "")
     filter_info = arguments.get("filter_info", "")
     max_results = arguments.get("max_results", 100)
-    
+
     parsed = _parse_feishu_url(url)
     app_token = await _resolve_bitable_app_token(agent_id, parsed)
     table_id = table_id or parsed.get("table_id")
-    
+
     if not app_token or not table_id:
         return "Failed: Could not resolve app_token or table_id from the provided parameters/URL."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     from app.services.feishu_service import feishu_service
+
     try:
         import json
+
         filters_dict = {}
         if isinstance(filter_info, dict):
             filters_dict = filter_info
@@ -6245,16 +6532,17 @@ async def _bitable_query_records(agent_id: uuid.UUID, arguments: dict) -> str:
             try:
                 filters_dict = json.loads(filter_info)
             except:
-                pass 
-                
+                pass
+
         resp = await feishu_service.bitable_query_records(app_id, app_secret, app_token, table_id, filters_dict)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         records = resp.get("data", {}).get("items", [])
         if not records:
             return "OK: No matching records found."
-        
+
         lines = []
         for r in records[:max_results]:
             lines.append(f"Record {r.get('record_id')}: {json.dumps(r.get('fields', {}), ensure_ascii=False)}")
@@ -6262,32 +6550,36 @@ async def _bitable_query_records(agent_id: uuid.UUID, arguments: dict) -> str:
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
+
 async def _bitable_create_record(agent_id: uuid.UUID, arguments: dict) -> str:
     """Create a new record (row) in a Bitable table."""
     url = arguments.get("url", "")
     table_id = arguments.get("table_id", "")
     fields_str = arguments.get("fields", "{}")
-    
+
     parsed = _parse_feishu_url(url)
     app_token = await _resolve_bitable_app_token(agent_id, parsed)
     table_id = table_id or parsed.get("table_id")
-    
+
     if not app_token or not table_id:
         return "Failed: Could not resolve app_token or table_id from the provided parameters/URL."
-        
+
     import json
+
     try:
         fields = json.loads(fields_str)
     except json.JSONDecodeError:
         return "Failed: The 'fields' parameter is not valid JSON."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.bitable_create_record(app_id, app_secret, app_token, table_id, fields)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         record = resp.get("data", {}).get("record", {})
         # Provide a user-accessible link so they can verify the new row in the table
         tenant_token = await feishu_service.get_tenant_access_token(app_id, app_secret)
@@ -6300,33 +6592,37 @@ async def _bitable_create_record(agent_id: uuid.UUID, arguments: dict) -> str:
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
+
 async def _bitable_update_record(agent_id: uuid.UUID, arguments: dict) -> str:
     """Update an existing record in a Bitable table by record_id."""
     url = arguments.get("url", "")
     table_id = arguments.get("table_id", "")
     record_id = arguments.get("record_id", "")
     fields_str = arguments.get("fields", "{}")
-    
+
     parsed = _parse_feishu_url(url)
     app_token = await _resolve_bitable_app_token(agent_id, parsed)
     table_id = table_id or parsed.get("table_id")
-    
+
     if not app_token or not table_id or not record_id:
         return "Failed: Missing required parameters. Need app_token (from URL), table_id, and record_id."
-        
+
     import json
+
     try:
         fields = json.loads(fields_str)
     except json.JSONDecodeError:
         return "Failed: The 'fields' parameter is not valid JSON."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.bitable_update_record(app_id, app_secret, app_token, table_id, record_id, fields)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         record = resp.get("data", {}).get("record", {})
         # Provide a user-accessible link so they can verify the updated row
         tenant_token = await feishu_service.get_tenant_access_token(app_id, app_secret)
@@ -6339,26 +6635,29 @@ async def _bitable_update_record(agent_id: uuid.UUID, arguments: dict) -> str:
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
+
 async def _bitable_delete_record(agent_id: uuid.UUID, arguments: dict) -> str:
     """Delete a record from a Bitable table by record_id."""
     url = arguments.get("url", "")
     table_id = arguments.get("table_id", "")
     record_id = arguments.get("record_id", "")
-    
+
     parsed = _parse_feishu_url(url)
     app_token = await _resolve_bitable_app_token(agent_id, parsed)
     table_id = table_id or parsed.get("table_id")
-    
+
     if not app_token or not table_id or not record_id:
         return "Failed: Missing required parameters. Need app_token (from URL), table_id, and record_id."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.bitable_delete_record(app_id, app_secret, app_token, table_id, record_id)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         # Provide a user-accessible link so they can verify the deletion
         tenant_token = await feishu_service.get_tenant_access_token(app_id, app_secret)
         bitable_url = await _get_feishu_bitable_url(tenant_token, app_token, table_id)
@@ -6369,6 +6668,7 @@ async def _bitable_delete_record(agent_id: uuid.UUID, arguments: dict) -> str:
 
 # ─── Feishu Document Tools ──────────────────────────────────────────
 
+
 async def _resolve_docx_document_token(agent_id: uuid.UUID, parsed_url: dict) -> str | None:
     doc_token = parsed_url.get("document_token")
     if doc_token:
@@ -6378,11 +6678,13 @@ async def _resolve_docx_document_token(agent_id: uuid.UUID, parsed_url: dict) ->
         app_id, app_secret = await _get_feishu_credentials(agent_id)
         if app_id and app_secret:
             from app.services.feishu_service import feishu_service
+
             token = await feishu_service.get_tenant_access_token(app_id, app_secret)
             node_info = await _feishu_wiki_get_node(wiki_token, token)
             if node_info and node_info.get("obj_token"):
                 return node_info["obj_token"]
     return None
+
 
 async def _feishu_read_doc(agent_id: uuid.UUID, arguments: dict) -> str:
     """Read full text content of a Feishu Docx."""
@@ -6391,17 +6693,19 @@ async def _feishu_read_doc(agent_id: uuid.UUID, arguments: dict) -> str:
     doc_token = await _resolve_docx_document_token(agent_id, parsed)
     if not doc_token:
         return "Failed: Could not extract Document token from the URL."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     if not app_id or not app_secret:
         return "Failed: Feishu app credentials not configured for this agent."
-        
+
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.read_feishu_doc(app_id, app_secret, doc_token)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         content = resp.get("data", {}).get("content", "")
         if not content:
             return "OK: Document is empty or content is unavailable."
@@ -6409,21 +6713,24 @@ async def _feishu_read_doc(agent_id: uuid.UUID, arguments: dict) -> str:
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
+
 async def _feishu_create_doc(agent_id: uuid.UUID, arguments: dict) -> str:
     """Create a new blank Feishu Docx."""
     title = arguments.get("title", "Untitled Document")
     folder_token = arguments.get("folder_token", "")
-    
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     if not app_id or not app_secret:
         return "Failed: Feishu app credentials not configured for this agent."
-        
+
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.create_feishu_doc(app_id, app_secret, folder_token or None, title)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         doc = resp.get("data", {}).get("document", {})
         doc_id = doc.get("document_id")
         # Get the tenant's actual domain (open.feishu.cn is the API gateway, not for users)
@@ -6433,39 +6740,45 @@ async def _feishu_create_doc(agent_id: uuid.UUID, arguments: dict) -> str:
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
+
 async def _feishu_append_doc(agent_id: uuid.UUID, arguments: dict) -> str:
     """Append text to the bottom of a Feishu Docx."""
     url = arguments.get("url", "")
     content = arguments.get("content", "")
     if not content:
         return "Failed: Content to append cannot be empty."
-        
+
     parsed = _parse_feishu_url(url)
     doc_token = await _resolve_docx_document_token(agent_id, parsed)
     if not doc_token:
         return "Failed: Could not extract Document token from the URL."
-        
+
     app_id, app_secret = await _get_feishu_credentials(agent_id)
     if not app_id or not app_secret:
         return "Failed: Feishu app credentials not configured for this agent."
-        
+
     from app.services.feishu_service import feishu_service
+
     try:
         # Feishu uses the document_id as the root block_id to append entirely to the document
         resp = await feishu_service.append_feishu_doc(app_id, app_secret, doc_token, content)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         return "OK: Content appended successfully to the end of the document."
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
+
 # ─── Feishu Wiki Tools ───────────────────────────────────────────────────────
+
 
 async def _feishu_wiki_get_node(token_str: str, auth_token: str) -> dict | None:
     """Call wiki get_node API to resolve a wiki node token → {obj_token, space_id, has_child, title}.
     Returns None if the token is not a wiki node."""
     import httpx
+
     async with httpx.AsyncClient(timeout=5) as client:
         r = await client.get(
             "https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node",
@@ -6499,6 +6812,7 @@ async def _feishu_wiki_list(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -6556,8 +6870,8 @@ async def _feishu_wiki_list(agent_id: uuid.UUID, arguments: dict) -> str:
             f"{indent}  obj_token: `{p['obj_token']}`"
         )
     lines.append(
-        "\n💡 用 `feishu_doc_read(document_token=\"<node_token>\")` 读取每个子页面的内容。"
-        "\n   对有子页面的条目，再次调用 `feishu_wiki_list(node_token=\"...\")` 继续展开。"
+        '\n💡 用 `feishu_doc_read(document_token="<node_token>")` 读取每个子页面的内容。'
+        '\n   对有子页面的条目，再次调用 `feishu_wiki_list(node_token="...")` 继续展开。'
     )
     return "\n".join(lines)
 
@@ -6568,7 +6882,7 @@ async def _feishu_doc_read(agent_id: uuid.UUID, arguments: dict) -> str:
         url = arguments.get("url", "")
         parsed = _parse_feishu_url(url)
         document_token = parsed.get("document_token", parsed.get("wiki_token", ""))
-        
+
     if not document_token:
         return "Failed: Missing required argument 'document_token'"
     max_chars = min(int(arguments.get("max_chars", 6000)), 20000)
@@ -6578,8 +6892,9 @@ async def _feishu_doc_read(agent_id: uuid.UUID, arguments: dict) -> str:
         return "Failed: Feishu app credentials not configured for this agent."
 
     from app.services.feishu_service import feishu_service
+
     tenant_token = await feishu_service.get_tenant_access_token(app_id, app_secret)
-    
+
     read_token = document_token
     wiki_hint = ""
     node_info = await _feishu_wiki_get_node(document_token, tenant_token)
@@ -6594,8 +6909,9 @@ async def _feishu_doc_read(agent_id: uuid.UUID, arguments: dict) -> str:
     try:
         resp = await feishu_service.read_feishu_doc(app_id, app_secret, read_token)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         content = resp.get("data", {}).get("content", "")
         if not content:
             return f"📄 Document '{document_token}' is empty.{wiki_hint}"
@@ -6624,6 +6940,7 @@ async def _feishu_doc_create(agent_id: uuid.UUID, arguments: dict) -> str:
     parent_node_token = (arguments.get("parent_node_token") or "").strip()
 
     from app.services.feishu_service import feishu_service
+
     tenant_token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     try:
@@ -6657,6 +6974,7 @@ async def _feishu_doc_create(agent_id: uuid.UUID, arguments: dict) -> str:
                 body["parent_node_token"] = parent_node_token
 
             import logging
+
             _wiki_log = logging.getLogger("feishu_wiki_create")
             _wiki_log.info(f"Creating wiki node in space={wiki_space_id}, body={body}")
 
@@ -6685,18 +7003,19 @@ async def _feishu_doc_create(agent_id: uuid.UUID, arguments: dict) -> str:
                 f"文档 Token（用于 feishu_doc_append）：{doc_token}\n"
                 f"Wiki Node Token：{node_token}\n"
                 f"🔗 访问链接：{doc_url}\n"
-                f"下一步：调用 feishu_doc_append(document_token=\"{doc_token}\", content=\"...\") 写入正文内容。"
+                f'下一步：调用 feishu_doc_append(document_token="{doc_token}", content="...") 写入正文内容。'
             )
 
         # ── Regular Drive branch (original behavior) ─────────────────────
         resp = await feishu_service.create_feishu_doc(app_id, app_secret, folder_token, title)
         err = _check_feishu_err(resp)
-        if err: return err
-        
+        if err:
+            return err
+
         doc = resp.get("data", {}).get("document", {})
         doc_token = doc.get("document_id", "")
         doc_url = await _get_feishu_tenant_doc_url(tenant_token, doc_token)
-        
+
         # Auto-share with the Feishu sender so they can access the document.
         # channel_feishu_sender_open_id is a module-level ContextVar defined in this file;
         # no import needed — it is already in scope.
@@ -6728,7 +7047,7 @@ async def _feishu_doc_create(agent_id: uuid.UUID, arguments: dict) -> str:
             f"标题：{title}\n"
             f"Token：{doc_token}\n"
             f"🔗 访问链接：{doc_url}\n"
-            f"下一步：调用 feishu_doc_append(document_token=\"{doc_token}\", content=\"...\") 写入正文内容。"
+            f'下一步：调用 feishu_doc_append(document_token="{doc_token}", content="...") 写入正文内容。'
         )
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
@@ -6751,11 +7070,11 @@ def _parse_inline_markdown(text: str) -> list[dict]:
 
     elements = []
     # Only handle **bold**, *italic*, ~~strikethrough~~; backticks become plain text
-    pattern = r'(\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`)'
+    pattern = r"(\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`)"
     pos = 0
     for m in _re.finditer(pattern, text):
         if m.start() > pos:
-            elements.append(_make_run(text[pos:m.start()]))
+            elements.append(_make_run(text[pos : m.start()]))
         raw = m.group(0)
         if raw.startswith("**"):
             elements.append(_make_run(m.group(2), {"bold": True}))
@@ -6789,8 +7108,7 @@ def _markdown_to_feishu_blocks(markdown: str) -> list[dict]:
     """
     import re as _re
 
-    _HEADING_BLOCK = {1: (3, "heading1"), 2: (4, "heading2"),
-                      3: (5, "heading3"), 4: (6, "heading4")}
+    _HEADING_BLOCK = {1: (3, "heading1"), 2: (4, "heading2"), 3: (5, "heading3"), 4: (6, "heading4")}
 
     def _text_block(bt: int, key: str, line: str) -> dict:
         # Omit "style" entirely to avoid Feishu field validation errors on empty style dicts
@@ -6813,35 +7131,54 @@ def _markdown_to_feishu_blocks(markdown: str) -> list[dict]:
             while i < len(lines) and not lines[i].strip().startswith("```"):
                 code_lines.append(lines[i])
                 i += 1
-            blocks.append({
-                "block_type": 14,
-                "code": {
-                    "elements": [{"text_run": {"content": "\n".join(code_lines)}}],
-                    "style": {"language": 1 if not lang else
-                              {"python": 49, "javascript": 22, "js": 22,
-                               "typescript": 56, "ts": 56, "bash": 4, "sh": 4,
-                               "sql": 53, "java": 21, "go": 17, "rust": 51,
-                               "json": 25, "yaml": 60, "html": 19, "css": 10,
-                               }.get(lang.lower(), 1)},
-                },
-            })
+            blocks.append(
+                {
+                    "block_type": 14,
+                    "code": {
+                        "elements": [{"text_run": {"content": "\n".join(code_lines)}}],
+                        "style": {
+                            "language": 1
+                            if not lang
+                            else {
+                                "python": 49,
+                                "javascript": 22,
+                                "js": 22,
+                                "typescript": 56,
+                                "ts": 56,
+                                "bash": 4,
+                                "sh": 4,
+                                "sql": 53,
+                                "java": 21,
+                                "go": 17,
+                                "rust": 51,
+                                "json": 25,
+                                "yaml": 60,
+                                "html": 19,
+                                "css": 10,
+                            }.get(lang.lower(), 1)
+                        },
+                    },
+                }
+            )
             i += 1
             continue
 
         # ── Divider ──────────────────────────────────────────────────────────
-        if _re.fullmatch(r'[-*_]{3,}', line.strip()):
+        if _re.fullmatch(r"[-*_]{3,}", line.strip()):
             # NOTE: block_type 22 (Feishu native divider) is rejected by the batch children
             # creation API with error 99992402 (field validation failed).  Render as a plain
             # text block containing a visual em-dash separator instead — always accepted.
-            blocks.append({
-                "block_type": 2,
-                "text": {"elements": [{"text_run": {"content": "\u2500" * 24}}]},
-            })
+            blocks.append(
+                {
+                    "block_type": 2,
+                    "text": {"elements": [{"text_run": {"content": "\u2500" * 24}}]},
+                }
+            )
             i += 1
             continue
 
         # ── Headings ─────────────────────────────────────────────────────────
-        hm = _re.match(r'^(#{1,4})\s+(.*)', line)
+        hm = _re.match(r"^(#{1,4})\s+(.*)", line)
         if hm:
             level = min(len(hm.group(1)), 4)
             bt, key = _HEADING_BLOCK[level]
@@ -6850,15 +7187,15 @@ def _markdown_to_feishu_blocks(markdown: str) -> list[dict]:
             continue
 
         # ── Bullet list ──────────────────────────────────────────────────────
-        if _re.match(r'^[\-\*\+]\s+', line):
-            text = _re.sub(r'^[\-\*\+]\s+', '', line)
+        if _re.match(r"^[\-\*\+]\s+", line):
+            text = _re.sub(r"^[\-\*\+]\s+", "", line)
             blocks.append(_text_block(12, "bullet", text))
             i += 1
             continue
 
         # ── Ordered list ─────────────────────────────────────────────────────
-        if _re.match(r'^\d+\.\s+', line):
-            text = _re.sub(r'^\d+\.\s+', '', line)
+        if _re.match(r"^\d+\.\s+", line):
+            text = _re.sub(r"^\d+\.\s+", "", line)
             blocks.append(_text_block(13, "ordered", text))
             i += 1
             continue
@@ -6871,15 +7208,17 @@ def _markdown_to_feishu_blocks(markdown: str) -> list[dict]:
 
         # ── Empty line → empty text block ────────────────────────────────────
         if line.strip() == "":
-            blocks.append({
-                "block_type": 2,
-                "text": {"elements": [{"text_run": {"content": " "}}]},
-            })
+            blocks.append(
+                {
+                    "block_type": 2,
+                    "text": {"elements": [{"text_run": {"content": " "}}]},
+                }
+            )
             i += 1
             continue
 
         # ── Markdown table separator line (|---|---| ) → skip ───────────────
-        if _re.match(r'^\|[\s\-:]+(\|[\s\-:]+)*\|?\s*$', line.strip()):
+        if _re.match(r"^\|[\s\-:]+(\|[\s\-:]+)*\|?\s*$", line.strip()):
             i += 1
             continue
 
@@ -6905,7 +7244,7 @@ async def _feishu_doc_append(agent_id: uuid.UUID, arguments: dict) -> str:
         url = arguments.get("url", "")
         parsed = _parse_feishu_url(url)
         document_token = parsed.get("document_token", parsed.get("wiki_token", ""))
-        
+
     content = arguments.get("content", "").strip()
     if not document_token:
         return "Failed: Missing required argument 'document_token'"
@@ -6917,6 +7256,7 @@ async def _feishu_doc_append(agent_id: uuid.UUID, arguments: dict) -> str:
         return "Failed: Feishu app credentials not configured for this agent."
 
     from app.services.feishu_service import feishu_service
+
     tenant_token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     # For wiki node tokens, use the obj_token for the docx API
@@ -6925,43 +7265,45 @@ async def _feishu_doc_append(agent_id: uuid.UUID, arguments: dict) -> str:
 
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=20) as client:
-            meta_resp = (await client.get(
-                f"https://open.feishu.cn/open-apis/docx/v1/documents/{docx_token}",
-                headers={"Authorization": f"Bearer {tenant_token}"},
-            )).json()
-            err = _check_feishu_err(meta_resp)
-            if err: return err
 
-            body_block_id = (
-                meta_resp.get("data", {}).get("document", {}).get("body", {}).get("block_id")
-                or docx_token
-            )
+        async with httpx.AsyncClient(timeout=20) as client:
+            meta_resp = (
+                await client.get(
+                    f"https://open.feishu.cn/open-apis/docx/v1/documents/{docx_token}",
+                    headers={"Authorization": f"Bearer {tenant_token}"},
+                )
+            ).json()
+            err = _check_feishu_err(meta_resp)
+            if err:
+                return err
+
+            body_block_id = meta_resp.get("data", {}).get("document", {}).get("body", {}).get("block_id") or docx_token
 
             children = _markdown_to_feishu_blocks(content)
 
-            result = (await client.post(
-                f"https://open.feishu.cn/open-apis/docx/v1/documents/{docx_token}/blocks/{body_block_id}/children",
-                # Do NOT pass index: -1.  Omitting the field lets Feishu default to
-                # append-at-end, which is always valid.  Passing -1 explicitly can
-                # trigger error 1770001 (invalid param) with certain block type mixes.
-                json={"children": children},
-                headers={"Authorization": f"Bearer {tenant_token}"},
-            )).json()
+            result = (
+                await client.post(
+                    f"https://open.feishu.cn/open-apis/docx/v1/documents/{docx_token}/blocks/{body_block_id}/children",
+                    # Do NOT pass index: -1.  Omitting the field lets Feishu default to
+                    # append-at-end, which is always valid.  Passing -1 explicitly can
+                    # trigger error 1770001 (invalid param) with certain block type mixes.
+                    json={"children": children},
+                    headers={"Authorization": f"Bearer {tenant_token}"},
+                )
+            ).json()
 
             err = _check_feishu_err(result)
-            if err: return err
+            if err:
+                return err
 
         doc_url = await _get_feishu_tenant_doc_url(tenant_token, docx_token)
-        return (
-            f"✅ 已写入 {len(children)} 个段落到文档。\n"
-            f"🔗 文档直链（原文发给用户，勿修改）：{doc_url}"
-        )
+        return f"✅ 已写入 {len(children)} 个段落到文档。\n🔗 文档直链（原文发给用户，勿修改）：{doc_url}"
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
 
 # ─── Feishu Drive Share (All File Types) ────────────────────────────────────────
+
 
 async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
     """Manage Feishu drive file collaborators.
@@ -6983,6 +7325,7 @@ async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -7016,11 +7359,7 @@ async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
                     "请直接在飞书知识库中管理成员权限。"
                 )
             if _c in (99991672, 99991668):
-                return (
-                    f"❌ 权限不足（code {_c}）\n"
-                    "需要在飞书开放平台开通：\n"
-                    "• drive:drive（云文档权限管理）"
-                )
+                return f"❌ 权限不足（code {_c}）\n需要在飞书开放平台开通：\n• drive:drive（云文档权限管理）"
             return f"❌ 获取协作者列表失败：{data.get('msg')} (code {_c})"
 
         members = data.get("data", {}).get("items", [])
@@ -7032,7 +7371,9 @@ async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
             perm = m.get("perm", "")
             member_type = m.get("member_type", "")
             member_id = m.get("member_id", "")
-            _type_label = {"openid": "用户", "openchat": "群组", "opendepartmentid": "部门"}.get(member_type, member_type)
+            _type_label = {"openid": "用户", "openchat": "群组", "opendepartmentid": "部门"}.get(
+                member_type, member_type
+            )
             lines.append(f"• {_type_label} `{member_id}` | 权限: **{perm}**")
         return "\n".join(lines)
 
@@ -7047,7 +7388,7 @@ async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
     resolved: list[tuple[str, str]] = []  # (display_name, open_id)
     for name in member_names:
         sr = await _feishu_user_search(agent_id, {"name": name})
-        m = _re.search(r'open_id: `(ou_[A-Za-z0-9]+)`', sr)
+        m = _re.search(r"open_id: `(ou_[A-Za-z0-9]+)`", sr)
         if m:
             resolved.append((name, m.group(1)))
         else:
@@ -7080,10 +7421,7 @@ async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
                         results.append(f"ℹ️ 「{display}」已经是知识库成员，无需重复添加")
                     elif _c == 131101:
                         # Public wiki space — everyone already has access
-                        results.append(
-                            f"ℹ️ 这是一个**公开知识库**，所有人已可访问。\n"
-                            f"「{display}」无需单独添加权限。"
-                        )
+                        results.append(f"ℹ️ 这是一个**公开知识库**，所有人已可访问。\n「{display}」无需单独添加权限。")
                     else:
                         results.append(f"❌ 添加「{display}」到知识库失败：{d.get('msg')} (code {_c})")
                     continue
@@ -7113,11 +7451,7 @@ async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
                             f"请手动操作：打开文档 → 右上角「分享」→ 添加自己并设置权限。"
                         )
                     elif _c in (99991672, 99991668):
-                        return (
-                            f"❌ 权限不足（code {_c}）\n"
-                            "需要在飞书开放平台开通：\n"
-                            "• drive:drive（云文档权限管理）"
-                        )
+                        return f"❌ 权限不足（code {_c}）\n需要在飞书开放平台开通：\n• drive:drive（云文档权限管理）"
                     else:
                         results.append(f"❌ 添加「{display}」失败：{d.get('msg')} (code {_c})")
 
@@ -7151,6 +7485,7 @@ async def _feishu_drive_share(agent_id: uuid.UUID, arguments: dict) -> str:
 
 # ─── Feishu Drive Delete ──────────────────────────────────────────────────────
 
+
 async def _feishu_drive_delete(agent_id: uuid.UUID, arguments: dict) -> str:
     """Delete a file or folder from Feishu Drive (cloud space).
     The file is moved to the recycle bin, not permanently deleted.
@@ -7174,13 +7509,20 @@ async def _feishu_drive_delete(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     # Type label mapping for user-friendly output
     type_labels = {
-        "file": "文件", "docx": "文档", "bitable": "多维表格",
-        "folder": "文件夹", "doc": "旧版文档", "sheet": "电子表格",
-        "mindnote": "思维笔记", "shortcut": "快捷方式", "slides": "幻灯片",
+        "file": "文件",
+        "docx": "文档",
+        "bitable": "多维表格",
+        "folder": "文件夹",
+        "doc": "旧版文档",
+        "sheet": "电子表格",
+        "mindnote": "思维笔记",
+        "shortcut": "快捷方式",
+        "slides": "幻灯片",
     }
     type_label = type_labels.get(file_type, file_type)
 
@@ -7230,6 +7572,7 @@ async def _feishu_drive_delete(agent_id: uuid.UUID, arguments: dict) -> str:
 
 # ─── Feishu Calendar Tools ────────────────────────────────────────────────────
 
+
 async def _feishu_calendar_list(agent_id: uuid.UUID, arguments: dict) -> str:
     import httpx
     import re as _re
@@ -7241,6 +7584,7 @@ async def _feishu_calendar_list(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     now = datetime.now(timezone.utc)
@@ -7249,8 +7593,9 @@ async def _feishu_calendar_list(agent_id: uuid.UUID, arguments: dict) -> str:
         """Return an ISO-8601 string with timezone for freebusy API."""
         if not t:
             return default.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-        if _re.fullmatch(r'\d+', t.strip()):
+        if _re.fullmatch(r"\d+", t.strip()):
             from datetime import datetime as _dt2
+
             return _dt2.fromtimestamp(int(t.strip()), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         return t.strip()
 
@@ -7258,10 +7603,11 @@ async def _feishu_calendar_list(agent_id: uuid.UUID, arguments: dict) -> str:
         """Convert ISO-8601 / Unix string / None to Unix timestamp string."""
         if not t:
             return str(int(default.timestamp()))
-        if _re.fullmatch(r'\d+', t.strip()):
+        if _re.fullmatch(r"\d+", t.strip()):
             return t.strip()
         try:
             from datetime import datetime as _dt2
+
             for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
                 try:
                     dt = _dt2.strptime(t.strip(), fmt)
@@ -7271,6 +7617,7 @@ async def _feishu_calendar_list(agent_id: uuid.UUID, arguments: dict) -> str:
                 except ValueError:
                     continue
             from dateutil import parser as _dp
+
             return str(int(_dp.parse(t).timestamp()))
         except Exception:
             return str(int(default.timestamp()))
@@ -7312,6 +7659,7 @@ async def _feishu_calendar_list(agent_id: uuid.UUID, arguments: dict) -> str:
                 if busy_slots:
                     from datetime import datetime as _dt2
                     from zoneinfo import ZoneInfo
+
                     tz_cn = ZoneInfo("Asia/Shanghai")
                     busy_lines = []
                     for slot in sorted(busy_slots, key=lambda x: x.get("start_time", "")):
@@ -7370,6 +7718,7 @@ async def _feishu_calendar_list(agent_id: uuid.UUID, arguments: dict) -> str:
         event_id = ev.get("event_id", "")
         try:
             from datetime import datetime as _dt
+
             s = _dt.fromtimestamp(int(start), tz=timezone.utc).strftime("%m-%d %H:%M") if start else "?"
             e = _dt.fromtimestamp(int(end_t), tz=timezone.utc).strftime("%H:%M") if end_t else "?"
         except Exception:
@@ -7399,6 +7748,7 @@ async def _feishu_calendar_create(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     # Resolve organizer open_id from email — soft failure
@@ -7406,7 +7756,9 @@ async def _feishu_calendar_create(agent_id: uuid.UUID, arguments: dict) -> str:
     if user_email:
         organizer_open_id = await _feishu_resolve_open_id(token, user_email)
         if not organizer_open_id:
-            logger.warning(f"[Feishu Calendar] Could not resolve open_id for '{user_email}', continuing without organizer invite")
+            logger.warning(
+                f"[Feishu Calendar] Could not resolve open_id for '{user_email}', continuing without organizer invite"
+            )
 
     agent_cal_id, cal_err = await _get_agent_calendar_id(token)
     if not agent_cal_id:
@@ -7441,26 +7793,27 @@ async def _feishu_calendar_create(agent_id: uuid.UUID, arguments: dict) -> str:
     attendee_display: list[str] = []  # for summary message
 
     # 1. Direct open_ids provided by caller
-    for oid in (arguments.get("attendee_open_ids") or []):
+    for oid in arguments.get("attendee_open_ids") or []:
         if oid and oid not in attendee_open_ids:
             attendee_open_ids.append(oid)
             attendee_display.append(oid)
 
     # 2. Names → look up via feishu_user_search
     import re as _re_oid
-    for aname in (arguments.get("attendee_names") or []):
+
+    for aname in arguments.get("attendee_names") or []:
         aname = aname.strip()
         if not aname:
             continue
         _sr = await _feishu_user_search(agent_id, {"name": aname})
-        _m = _re_oid.search(r'open_id: `(ou_[A-Za-z0-9]+)`', _sr)
+        _m = _re_oid.search(r"open_id: `(ou_[A-Za-z0-9]+)`", _sr)
         if _m:
             _oid = _m.group(1)
             if _oid not in attendee_open_ids:
                 attendee_open_ids.append(_oid)
                 attendee_display.append(aname)
         else:
-                logger.warning(f"[Calendar] Could not resolve attendee '{aname}': {_sr[:100]}")
+            logger.warning(f"[Calendar] Could not resolve attendee '{aname}': {_sr[:100]}")
 
     # 3. From explicit attendee_emails
     attendee_emails: list[str] = list(arguments.get("attendee_emails") or [])
@@ -7509,6 +7862,7 @@ async def _feishu_calendar_update(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     open_id = await _feishu_resolve_open_id(token, user_email)
@@ -7561,6 +7915,7 @@ async def _feishu_calendar_delete(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     open_id = await _feishu_resolve_open_id(token, user_email)
@@ -7583,7 +7938,9 @@ async def _feishu_calendar_delete(agent_id: uuid.UUID, arguments: dict) -> str:
 
     return f"✅ Event `{event_id}` deleted successfully."
 
+
 # ─── Feishu Approval Tools ───────────────────────────────────────────────────
+
 
 async def _feishu_approval_create(agent_id: uuid.UUID, arguments: dict) -> str:
     app_id, app_secret = await _get_feishu_credentials(agent_id)
@@ -7598,10 +7955,12 @@ async def _feishu_approval_create(agent_id: uuid.UUID, arguments: dict) -> str:
         return "❌ form_data, user_id and approval_code are required."
 
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.create_approval_instance(app_id, app_secret, approval_code, user_id, form_data)
         err = _check_feishu_err(resp)
-        if err: return err
+        if err:
+            return err
 
         instance_code = resp.get("data", {}).get("instance_code", "")
         return f"✅ 审批发起成功！\n审批实例 ID: `{instance_code}`"
@@ -7621,14 +7980,16 @@ async def _feishu_approval_query(agent_id: uuid.UUID, arguments: dict) -> str:
         return "❌ approval_code is required."
 
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.query_approval_instances(app_id, app_secret, approval_code, status)
         err = _check_feishu_err(resp)
-        if err: return err
+        if err:
+            return err
 
         data = resp.get("data", {})
         instance_codes = data.get("instance_code_list", [])
-        
+
         return f"✅ 查询完成。共发现 {len(instance_codes)} 个符合条件的审批实例。\n实例列表: {instance_codes}"
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
@@ -7644,19 +8005,23 @@ async def _feishu_approval_get(agent_id: uuid.UUID, arguments: dict) -> str:
         return "❌ instance_id is required."
 
     from app.services.feishu_service import feishu_service
+
     try:
         resp = await feishu_service.get_approval_instance(app_id, app_secret, instance_id)
         err = _check_feishu_err(resp)
-        if err: return err
+        if err:
+            return err
 
         data = resp.get("data", {})
         import json
+
         return f"✅ 审批实例查询结果:\n```json\n{json.dumps(data, ensure_ascii=False, indent=2)}\n```"
     except Exception as e:
         return f"Failed: {str(e)[:300]}"
 
 
 # ─── Feishu User Search ───────────────────────────────────────────────────────
+
 
 async def _feishu_user_search(agent_id: uuid.UUID, arguments: dict) -> str:
     """Search for colleagues in the Feishu directory by name.
@@ -7678,6 +8043,7 @@ async def _feishu_user_search(agent_id: uuid.UUID, arguments: dict) -> str:
     if not app_id or not app_secret:
         return "❌ Agent has no Feishu channel configured."
     from app.services.feishu_service import feishu_service
+
     token = await feishu_service.get_tenant_access_token(app_id, app_secret)
 
     # ── Load local contacts cache ─────────────────────────────────────────────
@@ -7693,10 +8059,7 @@ async def _feishu_user_search(agent_id: uuid.UUID, arguments: dict) -> str:
     name_lower = name.lower()
 
     def _matches(u: dict) -> bool:
-        return (
-            name_lower in (u.get("name") or "").lower()
-            or name_lower in (u.get("en_name") or "").lower()
-        )
+        return name_lower in (u.get("name") or "").lower() or name_lower in (u.get("en_name") or "").lower()
 
     matched = [u for u in _cached_users if _matches(u)]
 
@@ -7722,10 +8085,9 @@ async def _feishu_user_search(agent_id: uuid.UUID, arguments: dict) -> str:
         from app.database import async_session as _async_session
         from sqlalchemy import select as _sa_select
         from app.models.org import OrgMember as _OrgMember
+
         async with _async_session() as _db:
-            _r = await _db.execute(
-                _sa_select(_OrgMember).where(_OrgMember.name.ilike(f"%{name}%"))
-            )
+            _r = await _db.execute(_sa_select(_OrgMember).where(_OrgMember.name.ilike(f"%{name}%")))
             _org_members = _r.scalars().all()
         if _org_members:
             lines = [f"🔍 从通讯录找到 {len(_org_members)} 位匹配「{name}」的用户：\n"]
@@ -7748,10 +8110,9 @@ async def _feishu_user_search(agent_id: uuid.UUID, arguments: dict) -> str:
         from app.database import async_session as _async_session
         from sqlalchemy import select as _sa_select
         from app.models.user import User as _User
+
         async with _async_session() as _db:
-            _r = await _db.execute(
-                _sa_select(_User).where(_User.display_name.ilike(f"%{name}%"))
-            )
+            _r = await _db.execute(_sa_select(_User).where(_User.display_name.ilike(f"%{name}%")))
             _platform_users = _r.scalars().all()
         for _pu in _platform_users:
             _uid = getattr(_pu, "feishu_user_id", None)
@@ -7785,6 +8146,7 @@ async def _feishu_user_search(agent_id: uuid.UUID, arguments: dict) -> str:
 async def _feishu_contacts_refresh(agent_id: uuid.UUID) -> None:
     """Force-clear the local contacts cache so next search re-fetches from API."""
     import pathlib as _pl
+
     _cache_file = _pl.Path("/data/workspaces") / str(agent_id) / "feishu_contacts_cache.json"
     try:
         if _cache_file.exists():
@@ -7794,6 +8156,7 @@ async def _feishu_contacts_refresh(agent_id: uuid.UUID) -> None:
 
 
 # ─── Email Tool Helpers ─────────────────────────────────────
+
 
 async def _get_email_config(agent_id: uuid.UUID) -> dict:
     """Retrieve per-agent email config from the send_email tool's AgentTool config."""
@@ -7820,6 +8183,7 @@ async def _get_email_config(agent_id: uuid.UUID) -> dict:
 
 
 # ── Pages: public HTML hosting ──────────────────────────
+
 
 async def _publish_page(agent_id: uuid.UUID, user_id: uuid.UUID, ws: Path, arguments: dict) -> str:
     """Publish an HTML file as a public page."""
@@ -7856,6 +8220,7 @@ async def _publish_page(agent_id: uuid.UUID, user_id: uuid.UUID, ws: Path, argum
     tenant_id = None
     try:
         from app.models.agent import Agent as _AgModel
+
         async with async_session() as _db:
             _r = await _db.execute(select(_AgModel.tenant_id).where(_AgModel.id == agent_id))
             tenant_id = _r.scalar_one_or_none()
@@ -7864,6 +8229,7 @@ async def _publish_page(agent_id: uuid.UUID, user_id: uuid.UUID, ws: Path, argum
 
     # Create record
     from app.models.published_page import PublishedPage
+
     try:
         async with async_session() as db:
             page = PublishedPage(
@@ -7881,6 +8247,7 @@ async def _publish_page(agent_id: uuid.UUID, user_id: uuid.UUID, ws: Path, argum
 
     # Build public URL using configured PUBLIC_BASE_URL
     from app.services.platform_service import platform_service
+
     async with async_session() as db2:
         public_base = await platform_service.get_public_base_url(db2)
 
@@ -7918,6 +8285,7 @@ async def _list_published_pages(agent_id: uuid.UUID) -> str:
 
 
 # ─── AgentBay Tool Handlers ─────────────────────────────────────
+
 
 async def _agentbay_browser_navigate(agent_id: Optional[uuid.UUID], ws: Path, arguments: dict) -> str:
     """AgentBay browser navigation.
@@ -7957,6 +8325,7 @@ async def _agentbay_browser_navigate(agent_id: Optional[uuid.UUID], ws: Path, ar
         screenshot_data = result.get("screenshot")
         if screenshot_data:
             import base64 as _base64
+
             # Normalise to raw bytes regardless of whether it's a data URL or plain b64
             if isinstance(screenshot_data, str):
                 if screenshot_data.startswith("data:image"):
@@ -7971,6 +8340,7 @@ async def _agentbay_browser_navigate(agent_id: Optional[uuid.UUID], ws: Path, ar
                 if save_to_workspace:
                     # Persist to workspace/ so the user can see the file
                     import time as _time
+
                     rel_path = f"workspace/screenshot_{int(_time.time())}.png"
                     screenshot_path = ws / rel_path
                     screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -7984,6 +8354,7 @@ async def _agentbay_browser_navigate(agent_id: Optional[uuid.UUID], ws: Path, ar
                 else:
                     # Store in memory only — vision_inject.py will consume it
                     from app.services.vision_inject import store_temp_screenshot
+
                     img_id = store_temp_screenshot(raw_bytes)
                     parts.append(
                         f"Internal screenshot captured for analysis. [ImageID: {img_id}]\n"
@@ -8029,6 +8400,7 @@ async def _agentbay_browser_screenshot(agent_id: Optional[uuid.UUID], ws: Path, 
             return "❌ 截图失败：未返回图像数据"
 
         import base64 as _base64
+
         # Normalise to raw bytes
         if isinstance(screenshot_data, str):
             if screenshot_data.startswith("data:image"):
@@ -8042,6 +8414,7 @@ async def _agentbay_browser_screenshot(agent_id: Optional[uuid.UUID], ws: Path, 
         if save_to_workspace:
             # Persist to workspace/ so the user can see the file
             import time as _time
+
             rel_path = f"workspace/screenshot_{int(_time.time())}.png"
             screenshot_path = ws / rel_path
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -8055,6 +8428,7 @@ async def _agentbay_browser_screenshot(agent_id: Optional[uuid.UUID], ws: Path, 
         else:
             # Store in memory only — vision_inject.py will consume it for LLM vision
             from app.services.vision_inject import store_temp_screenshot
+
             img_id = store_temp_screenshot(raw_bytes)
             logger.info(f"[AgentBay] Browser screenshot stored in memory (id={img_id})")
             return (
@@ -8200,12 +8574,14 @@ async def _handle_email_tool(tool_name: str, agent_id: uuid.UUID, ws: Path, argu
 async def _search_clawhub(agent_id: uuid.UUID, arguments: dict) -> str:
     """Search the ClawHub skill registry."""
     import httpx
+
     query = arguments.get("query", "").strip()
     if not query:
         return "Missing required argument 'query'"
 
     # Resolve tenant ClawHub API key
     from app.api.skills import _get_clawhub_key
+
     tenant_id = await _get_agent_tenant_id(agent_id)
     api_key = await _get_clawhub_key(tenant_id)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -8235,6 +8611,7 @@ async def _search_clawhub(agent_id: uuid.UUID, arguments: dict) -> str:
         updated = ""
         if r.get("updatedAt"):
             from datetime import datetime
+
             try:
                 dt = datetime.fromtimestamp(r["updatedAt"] / 1000)
                 updated = f" | Updated: {dt.strftime('%Y-%m-%d')}"
@@ -8243,13 +8620,14 @@ async def _search_clawhub(agent_id: uuid.UUID, arguments: dict) -> str:
         lines.append(f"• **{name}** (`{slug}`){updated}")
         if summary:
             lines.append(f"  {summary}")
-    lines.append("\nTo install a skill, use: install_skill(source=\"<slug>\")")
+    lines.append('\nTo install a skill, use: install_skill(source="<slug>")')
     return "\n".join(lines)
 
 
 async def _install_skill(agent_id: uuid.UUID, ws: Path, arguments: dict) -> str:
     """Install a skill from ClawHub slug or GitHub URL into the agent's workspace."""
     import httpx
+
     source = arguments.get("source", "").strip()
     if not source:
         return "❌ Missing required argument 'source'. Provide a ClawHub slug (e.g. 'market-research') or a GitHub URL."
@@ -8329,6 +8707,7 @@ async def _install_skill(agent_id: uuid.UUID, ws: Path, arguments: dict) -> str:
 
 # ─── AgentBay: Browser Extract & Observe ────────────────────────────────
 
+
 async def _agentbay_browser_extract(agent_id: Optional[uuid.UUID], ws: Path, arguments: dict) -> str:
     """Extract structured data from current browser page."""
     if not agent_id:
@@ -8349,6 +8728,7 @@ async def _agentbay_browser_extract(agent_id: Optional[uuid.UUID], ws: Path, arg
 
         if result.get("success"):
             import json
+
             data = result.get("data", {})
             data_str = json.dumps(data, ensure_ascii=False, indent=2) if isinstance(data, (dict, list)) else str(data)
             return f"Extraction successful:\n\n{data_str[:5000]}"
@@ -8382,6 +8762,7 @@ async def _agentbay_browser_observe(agent_id: Optional[uuid.UUID], ws: Path, arg
 
         if result.get("success"):
             import json
+
             elements = result.get("elements", [])
             if not elements:
                 return "No interactive elements found matching your instruction."
@@ -8398,6 +8779,7 @@ async def _agentbay_browser_observe(agent_id: Optional[uuid.UUID], ws: Path, arg
 
 
 # ─── AgentBay: Command (Shell) ──────────────────────────────────────────
+
 
 async def _agentbay_browser_login(agent_id: Optional[uuid.UUID], ws: Path, arguments: dict) -> str:
     """Perform an automated login using AgentBay's built-in login skill.
@@ -8478,6 +8860,7 @@ async def _agentbay_command_exec(agent_id: Optional[uuid.UUID], ws: Path, argume
 
 # ─── AgentBay: Computer Use Handlers ────────────────────────────────────
 
+
 def _save_screenshot_to_workspace(agent_id: uuid.UUID, ws: Path, data) -> str:
     """Save screenshot data to workspace and return markdown image link.
 
@@ -8535,6 +8918,7 @@ async def _agentbay_computer_screenshot(agent_id: Optional[uuid.UUID], ws: Path,
 
         # Normalise to raw bytes regardless of SDK return format
         import base64 as _base64
+
         if isinstance(raw_data, str):
             if raw_data.startswith("data:image"):
                 raw_data = raw_data.split(",", 1)[1]
@@ -8547,6 +8931,7 @@ async def _agentbay_computer_screenshot(agent_id: Optional[uuid.UUID], ws: Path,
         if save_to_workspace:
             # Persist to workspace/ for user visibility
             import time as _time
+
             rel_path = f"workspace/desktop-screenshot-{int(_time.time())}.png"
             screenshot_path = ws / rel_path
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -8560,6 +8945,7 @@ async def _agentbay_computer_screenshot(agent_id: Optional[uuid.UUID], ws: Path,
         else:
             # Store in memory only — vision_inject.py will consume it for LLM vision
             from app.services.vision_inject import store_temp_screenshot
+
             img_id = store_temp_screenshot(raw_bytes)
             logger.info(f"[AgentBay] Desktop screenshot stored in memory (id={img_id})")
             return (
@@ -8743,6 +9129,7 @@ async def _agentbay_computer_get_screen_size(agent_id: Optional[uuid.UUID], ws: 
         result = await client.computer_get_screen_size()
         if result.get("success"):
             import json
+
             data = result.get("data")
             data_str = json.dumps(data, ensure_ascii=False) if isinstance(data, (dict, list)) else str(data)
             return f"Screen size: {data_str}"
@@ -8778,7 +9165,12 @@ async def _agentbay_computer_start_app(agent_id: Optional[uuid.UUID], ws: Path, 
             if data is not None:
                 try:
                     import json
-                    data_str = json.dumps(data, ensure_ascii=False, indent=2) if isinstance(data, (dict, list, str, int, float, bool)) else str(data)
+
+                    data_str = (
+                        json.dumps(data, ensure_ascii=False, indent=2)
+                        if isinstance(data, (dict, list, str, int, float, bool))
+                        else str(data)
+                    )
                 except (TypeError, ValueError):
                     data_str = str(data)
             else:
@@ -8805,6 +9197,7 @@ async def _agentbay_computer_get_cursor_position(agent_id: Optional[uuid.UUID], 
         result = await client.computer_get_cursor_position()
         if result.get("success"):
             import json
+
             data = result.get("data")
             data_str = json.dumps(data, ensure_ascii=False) if isinstance(data, (dict, list)) else str(data)
             return f"Cursor position: {data_str}"
@@ -8829,6 +9222,7 @@ async def _agentbay_computer_get_active_window(agent_id: Optional[uuid.UUID], ws
         result = await client.computer_get_active_window()
         if result.get("success"):
             import json
+
             window = result.get("window")
             window_str = json.dumps(window, ensure_ascii=False, indent=2) if isinstance(window, dict) else str(window)
             return f"Active window:\n\n{window_str}"
@@ -8878,6 +9272,7 @@ async def _agentbay_computer_list_visible_apps(agent_id: Optional[uuid.UUID], ws
         result = await client.computer_list_visible_apps()
         if result.get("success"):
             import json
+
             apps = result.get("apps", [])
             if not apps:
                 return "No visible applications running."

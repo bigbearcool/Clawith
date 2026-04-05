@@ -1,6 +1,7 @@
 """Feishu (Lark) OAuth and API integration service."""
 
 import httpx
+from loguru import logger
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 

@@ -483,7 +483,45 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 .limit(ctx_size)
             )
             history_msgs = history_result.scalars().all()
-            history = [{"role": m.role, "content": m.content} for m in reversed(history_msgs)]
+
+            # Format history with task context awareness
+            def _format_history_with_task_context(messages, session):
+                """Format history to help LLM understand completed vs pending tasks."""
+                formatted = []
+
+                for m in messages:
+                    # Compress tool-related messages to avoid confusion
+                    if m.role == "assistant":
+                        # Check if this looks like a tool call or tool result
+                        content = m.content or ""
+                        if any(marker in content.lower() for marker in ["tool_calls", "executed:", "工具", "调用"]):
+                            formatted.append({"role": "assistant", "content": "[已执行工具操作]"})
+                            continue
+
+                    formatted.append({"role": m.role, "content": m.content or ""})
+
+                # Add task context separator
+                if formatted and session and session.last_task_status:
+                    task_context = []
+                    if session.last_task_status == "completed":
+                        task_context.append(
+                            {
+                                "role": "system",
+                                "content": f"--- 历史任务已完成 ---\n任务描述: {session.last_task_description or 'N/A'}\n状态: 已完成\n\n以下是新的对话:",
+                            }
+                        )
+                    elif session.last_task_status == "in_progress":
+                        task_context.append(
+                            {
+                                "role": "system",
+                                "content": f"--- 上一任务正在进行中 ---\n任务描述: {session.last_task_description or 'N/A'}\n状态: 进行中\n\n如果用户的新消息与之前的任务无关，请直接回答新问题。",
+                            }
+                        )
+                    formatted.extend(task_context)
+
+                return formatted
+
+            history = _format_history_with_task_context(reversed(history_msgs), _pre_sess)
 
             # --- Resolve Feishu sender identity & find/create platform user ---
             import uuid as _uuid
@@ -617,6 +655,13 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 )
             )
             _sess.last_message_at = _dt.now(_tz.utc)
+
+            # Mark task as in_progress
+            _sess.last_task_status = "in_progress"
+            _sess.last_task_description = user_text[:200]  # Brief description
+            _sess.last_task_started_at = _dt.now(_tz.utc)
+            _sess.last_task_completed_at = None  # Clear previous completion
+
             await db.commit()
 
             # Prepend sender identity so the agent knows who is talking
@@ -955,6 +1000,11 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 _cfs.reset(_cfs_token)
                 _cfso.reset(_cfso_token)
             logger.info(f"[Feishu] LLM reply: {reply_text[:100]}")
+
+            # Mark task as completed
+            _sess.last_task_status = "completed"
+            _sess.last_task_completed_at = _dt.now(_tz.utc)
+            await db.commit()
 
             # Send final card update or fallback text
             if msg_id_for_patch:
