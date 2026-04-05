@@ -1200,12 +1200,15 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
         setSaving(true);
         setError('');
         try {
-            await adminApi.updateCompany(company.id, {
+            const result = await adminApi.updateCompany(company.id, {
                 name: name.trim() || undefined,
                 slug: slug.trim() || undefined,
                 sso_enabled: ssoEnabled,
-                sso_domain: ssoDomain.trim() || null,
             });
+            // Update sso_domain from response
+            if (result.sso_domain) {
+                setSsoDomain(result.sso_domain);
+            }
             onUpdated();
             onClose();
         } catch (e: any) {
@@ -1281,14 +1284,22 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
                     </div>
 
                     <div>
-                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>{t('admin.ssoDomain', 'Custom Access Domain')}</label>
-                        <input
-                            className="form-input"
-                            value={ssoDomain}
-                            onChange={e => setSsoDomain(e.target.value)}
-                            placeholder={t('admin.ssoDomainPlaceholder', 'e.g. acme.clawith.com')}
-                            style={{ fontSize: '13px' }}
-                        />
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>
+                            {t('admin.ssoDomain', 'SSO Domain (auto-generated)')}
+                        </label>
+                        <div style={{ 
+                            fontSize: '13px', 
+                            padding: '8px 12px', 
+                            background: 'var(--bg-tertiary)', 
+                            borderRadius: '6px',
+                            color: ssoDomain ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                            fontFamily: 'monospace'
+                        }}>
+                            {ssoDomain || t('admin.ssoDomainNotSet', 'Will be auto-generated from slug and platform URL')}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                            {t('admin.ssoDomainNote', 'Format: {slug}.{platform-domain}. Change slug to update.')}
+                        </div>
                     </div>
                 </div>
 
