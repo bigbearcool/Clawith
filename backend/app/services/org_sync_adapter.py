@@ -288,6 +288,7 @@ class BaseOrgSyncAdapter(ABC):
                 update(OrgDepartment)
                 .where(OrgDepartment.id == bindparam("b_id"))
                 .values(member_count=bindparam("b_count"))
+                .execution_options(synchronize_session=False)
             )
             # Re-map keys for bindparams
             bind_mappings = [{"b_id": m["id"], "b_count": m["member_count"]} for m in update_mappings]
@@ -856,6 +857,7 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
         token = await self.get_access_token()
         users: list[ExternalUser] = []
         page_token = ""
+        page_num = 0
 
         async with httpx.AsyncClient() as client:
             while True:
@@ -880,6 +882,12 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
 
                 res_data = data.get("data", {})
                 items = res_data.get("items", []) or []
+                page_num += 1
+                has_more = res_data.get("has_more", False)
+                logger.info(
+                    f"[Feishu] Page {page_num}: fetched {len(items)} users, has_more={has_more}, page_token={page_token[:20] if page_token else 'None'}"
+                )
+
                 for item in items:
                     raw_dept_ids = item.get("department_ids", [])
                     department_ids = [str(did) for did in raw_dept_ids] if raw_dept_ids else ["0"]
@@ -901,10 +909,10 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                     users.append(user)
 
                 page_token = res_data.get("page_token", "")
-                has_more = res_data.get("has_more", False)
                 if not has_more or not page_token:
                     break
 
+        logger.info(f"[Feishu] Total users fetched: {len(users)}")
         return users
 
     async def fetch_users(self, department_external_id: str) -> list[ExternalUser]:
