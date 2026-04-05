@@ -109,6 +109,11 @@ function PlatformTab() {
     const [nbSaving, setNbSaving] = useState(false);
     const [nbSaved, setNbSaved] = useState(false);
 
+    // Platform public URL
+    const [platformUrl, setPlatformUrl] = useState('');
+    const [platformUrlSaving, setPlatformUrlSaving] = useState(false);
+    const [platformUrlSaved, setPlatformUrlSaved] = useState(false);
+
 
     // System email configuration
     const [systemEmailConfig, setSystemEmailConfig] = useState({
@@ -161,8 +166,17 @@ function PlatformTab() {
                 setNbEnabled(!!d.value.enabled);
                 setNbText(d.value.text || '');
             }
-        }).catch(() => { });
-            
+}).catch(() => { });
+        
+        // Load Platform URL
+        fetchJson<any>('/enterprise/system-settings/platform')
+            .then(d => {
+                if (d?.value?.public_base_url) {
+                    setPlatformUrl(d.value.public_base_url);
+                }
+            })
+            .catch(() => { });
+
         // Load System Email
         fetchJson<any>('/enterprise/system-settings/system_email_platform')
             .then(d => {
@@ -216,6 +230,23 @@ function PlatformTab() {
             setTimeout(() => setNbSaved(false), 2000);
         } catch { }
         setNbSaving(false);
+    };
+
+    const savePlatformUrl = async () => {
+        setPlatformUrlSaving(true);
+        try {
+            await fetchJson('/enterprise/system-settings/platform', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: { public_base_url: platformUrl.trim() } }),
+            });
+            setPlatformUrlSaved(true);
+            setTimeout(() => setPlatformUrlSaved(false), 2000);
+            showToast(t('admin.platformUrl.saved', 'Platform URL saved. SSO domains will be regenerated for tenants with SSO enabled.'), 'success');
+        } catch (e: any) {
+            showToast(e.message || 'Failed to save', 'error');
+        }
+        setPlatformUrlSaving(false);
     };
 
 
@@ -378,6 +409,42 @@ function PlatformTab() {
                 </div>
             </div>
 
+            {/* Platform Public URL */}
+            <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text-secondary)' }}>
+                    {t('admin.platformUrl.title', 'Platform Public URL')}
+                </div>
+                <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
+                    {t('admin.platformUrl.description', 'The public base URL of this platform. Used for OAuth callbacks, email links, and SSO domain generation.')}
+                </p>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1 }}>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>
+                            {t('admin.platformUrl.label', 'Public URL')}
+                        </label>
+                        <input
+                            className="form-input"
+                            type="url"
+                            placeholder="https://your-domain.com"
+                            value={platformUrl}
+                            onChange={e => setPlatformUrl(e.target.value)}
+                            style={{ fontSize: '13px' }}
+                        />
+                    </div>
+                    <button 
+                        className="btn btn-primary" 
+                        onClick={savePlatformUrl} 
+                        disabled={platformUrlSaving}
+                        style={{ height: '36px' }}
+                    >
+                        {platformUrlSaving ? t('common.loading') : t('common.save', 'Save')}
+                    </button>
+                    {platformUrlSaved && <span style={{ color: 'var(--success)', fontSize: '12px' }}>{t('enterprise.config.saved', 'Saved')}</span>}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px' }}>
+                    {t('admin.platformUrl.note', 'Priority: Environment variable PUBLIC_BASE_URL > This setting > Auto-detect from request. SSO domains will be generated as: {slug}.{domain}') }
+                </div>
+            </div>
 
 
             {/* System Email Configuration */}

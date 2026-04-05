@@ -18,7 +18,7 @@ async def get_public_base_url_async(db=None) -> str:
     """Get the platform public base URL (async version - checks DB first, then env).
 
     Priority:
-    1. Database system_settings.public_base_url (if db provided)
+    1. Database system_settings.platform.public_base_url (if db provided)
     2. Environment variable PUBLIC_BASE_URL
 
     Returns empty string if not configured.
@@ -27,10 +27,10 @@ async def get_public_base_url_async(db=None) -> str:
         from sqlalchemy import select
         from app.models.system_settings import SystemSetting
 
-        result = await db.execute(select(SystemSetting).where(SystemSetting.key == "public_base_url"))
+        result = await db.execute(select(SystemSetting).where(SystemSetting.key == "platform"))
         setting = result.scalar_one_or_none()
-        if setting and setting.value:
-            return setting.value.strip().rstrip("/")
+        if setting and setting.value and setting.value.get("public_base_url"):
+            return setting.value["public_base_url"].strip().rstrip("/")
 
     return get_public_base_url_sync()
 
