@@ -697,7 +697,7 @@ async def seed_skills_from_directory(skills_dir: str = ".agents/skills"):
     Args:
         skills_dir: Path to the directory containing skill folders
     """
-    import re
+    import yaml
     from pathlib import Path
 
     base_path = Path(skills_dir)
@@ -705,41 +705,20 @@ async def seed_skills_from_directory(skills_dir: str = ".agents/skills"):
         logger.warning(f"[SkillSeeder] Skills directory not found: {skills_dir}")
         return
 
-    # Parse YAML frontmatter from SKILL.md
     def parse_frontmatter(content: str) -> dict:
         """Extract YAML frontmatter from markdown content."""
         if not content.startswith("---"):
             return {}
 
-        # Find the closing ---
         end_idx = content.find("\n---", 4)
         if end_idx == -1:
             return {}
 
         frontmatter_str = content[4:end_idx]
-        result = {}
-
-        # Simple YAML parsing (handle basic key: value pairs)
-        for line in frontmatter_str.split("\n"):
-            if ":" in line:
-                key, _, value = line.partition(":")
-                key = key.strip()
-                value = value.strip()
-                # Remove quotes if present
-                if value.startswith('"') and value.endswith('"'):
-                    value = value[1:-1]
-                elif value.startswith("'") and value.endswith("'"):
-                    value = value[1:-1]
-                # Handle multi-line descriptions
-                if key in result:
-                    if isinstance(result[key], list):
-                        result[key].append(value)
-                    else:
-                        result[key] = [result[key], value]
-                else:
-                    result[key] = value
-
-        return result
+        try:
+            return yaml.safe_load(frontmatter_str) or {}
+        except Exception:
+            return {}
 
     async with async_session() as db:
         seeded_count = 0
@@ -766,9 +745,8 @@ async def seed_skills_from_directory(skills_dir: str = ".agents/skills"):
                 description = " ".join(description)
 
             # Determine category from metadata or folder name
-            category = frontmatter.get("metadata", {}).get("category", "productivity")
-            if isinstance(category, dict):
-                category = category.get("category", "productivity")
+            metadata = frontmatter.get("metadata") or {}
+            category = metadata.get("category", "productivity") if isinstance(metadata, dict) else "productivity"
 
             # Collect all files
             files = []

@@ -215,7 +215,7 @@ async def lifespan(app: FastAPI):
         )
 
         await seed_skills()
-        await seed_skills_from_directory(".agents/skills")  # Load XiaoSheng skills
+        await seed_skills_from_directory("/data/skills")  # Load XiaoSheng skills (Docker volume mount)
         await push_default_skills_to_existing_agents()
     except Exception as e:
         logger.warning(f"[startup] Skills seed failed: {e}")
