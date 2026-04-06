@@ -40,6 +40,22 @@ class FeishuService:
             self._app_access_token = data.get("app_access_token", "")
             return self._app_access_token
 
+    async def get_tenant_access_token(self, app_id: str, app_secret: str) -> str:
+        """Get tenant access token for a specific Feishu app.
+
+        For most operations, tenant_access_token is equivalent to app_access_token.
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                FEISHU_APP_TOKEN_URL,
+                json={
+                    "app_id": app_id,
+                    "app_secret": app_secret,
+                },
+            )
+            data = resp.json()
+            return data.get("app_access_token", "")
+
     async def exchange_code_for_user(self, code: str) -> dict:
         """Exchange OAuth authorization code for user info.
 

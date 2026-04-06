@@ -35,7 +35,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
 interface LLMModel {
     id: string; provider: string; model: string; label: string;
-    base_url?: string; api_key_masked?: string; max_tokens_per_day?: number; enabled: boolean; supports_vision?: boolean; max_output_tokens?: number; request_timeout?: number; temperature?: number; created_at: string;
+    base_url?: string; api_key_masked?: string; max_tokens_per_day?: number; enabled: boolean; supports_vision?: boolean; streaming_tool_calls_unreliable?: boolean; max_output_tokens?: number; request_timeout?: number; temperature?: number; created_at: string;
 }
 
 interface LLMProviderSpec {
@@ -1861,7 +1861,7 @@ export default function EnterpriseSettings() {
     });
     const [showAddModel, setShowAddModel] = useState(false);
     const [editingModelId, setEditingModelId] = useState<string | null>(null);
-    const [modelForm, setModelForm] = useState({ provider: 'anthropic', model: '', api_key: '', base_url: '', label: '', supports_vision: false, max_output_tokens: '' as string, request_timeout: '' as string, temperature: '' as string });
+    const [modelForm, setModelForm] = useState({ provider: 'anthropic', model: '', api_key: '', base_url: '', label: '', supports_vision: false, streaming_tool_calls_unreliable: false, max_output_tokens: '' as string, request_timeout: '' as string, temperature: '' as string });
     const { data: providerSpecs = [] } = useQuery({
         queryKey: ['llm-provider-specs'],
         queryFn: () => fetchJson<LLMProviderSpec[]>('/enterprise/llm-providers'),
@@ -1962,7 +1962,7 @@ export default function EnterpriseSettings() {
                                     provider: defaultSpec?.provider || 'anthropic',
                                     model: '', api_key: '',
                                     base_url: defaultSpec?.default_base_url || '',
-                                    label: '', supports_vision: false,
+                                    label: '', supports_vision: false, streaming_tool_calls_unreliable: false,
                                     max_output_tokens: defaultSpec ? String(defaultSpec.default_max_tokens) : '4096',
                                     request_timeout: '',
                                     temperature: '',
@@ -2023,6 +2023,13 @@ export default function EnterpriseSettings() {
                                             <input type="checkbox" checked={modelForm.supports_vision} onChange={e => setModelForm({ ...modelForm, supports_vision: e.target.checked })} />
                                             {t('enterprise.llm.supportsVision')}
                                             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('enterprise.llm.supportsVisionDesc')}</span>
+                                        </label>
+                                    </div>
+                                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                                            <input type="checkbox" checked={modelForm.streaming_tool_calls_unreliable} onChange={e => setModelForm({ ...modelForm, streaming_tool_calls_unreliable: e.target.checked })} />
+                                            {t('enterprise.llm.streamingToolCallsUnreliable', '流式工具调用不可靠')}
+                                            <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('enterprise.llm.streamingToolCallsUnreliableDesc', 'MiniMax等不支持原生Function Calling的模型，将解析文本执行工具')}</span>
                                         </label>
                                     </div>
                                     <div className="form-group">
@@ -2134,6 +2141,13 @@ export default function EnterpriseSettings() {
                                                         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('enterprise.llm.supportsVisionDesc')}</span>
                                                     </label>
                                                 </div>
+                                                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                                                        <input type="checkbox" checked={modelForm.streaming_tool_calls_unreliable} onChange={e => setModelForm({ ...modelForm, streaming_tool_calls_unreliable: e.target.checked })} />
+                                                        {t('enterprise.llm.streamingToolCallsUnreliable', '流式工具调用不可靠')}
+                                                        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('enterprise.llm.streamingToolCallsUnreliableDesc', 'MiniMax等不支持原生Function Calling的模型，将解析文本执行工具')}</span>
+                                                    </label>
+                                                </div>
                                                 <div className="form-group">
                                                     <label className="form-label">{t('enterprise.llm.maxOutputTokens', 'Max Output Tokens')}</label>
                                                     <input className="form-input" type="number" placeholder={t('enterprise.llm.maxOutputTokensPlaceholder', 'e.g. 4096')} value={modelForm.max_output_tokens} onChange={e => setModelForm({ ...modelForm, max_output_tokens: e.target.value })} />
@@ -2230,9 +2244,10 @@ export default function EnterpriseSettings() {
                                                     }} />
                                                 </button>
                                                 {m.supports_vision && <span className="badge" style={{ background: 'rgba(99,102,241,0.15)', color: 'rgb(99,102,241)', fontSize: '10px' }}>Vision</span>}
+                                                {m.streaming_tool_calls_unreliable && <span className="badge" style={{ background: 'rgba(234,179,8,0.15)', color: 'rgb(234,179,8)', fontSize: '10px' }}>工具调用不可靠</span>}
                                                 <button className="btn btn-ghost" onClick={() => {
                                                     setEditingModelId(m.id);
-                                                    setModelForm({ provider: m.provider, model: m.model, label: m.label, base_url: m.base_url || '', api_key: m.api_key_masked || '', supports_vision: m.supports_vision || false, max_output_tokens: m.max_output_tokens ? String(m.max_output_tokens) : '', request_timeout: m.request_timeout ? String(m.request_timeout) : '', temperature: m.temperature !== null && m.temperature !== undefined ? String(m.temperature) : '' });
+                                                    setModelForm({ provider: m.provider, model: m.model, label: m.label, base_url: m.base_url || '', api_key: m.api_key_masked || '', supports_vision: m.supports_vision || false, streaming_tool_calls_unreliable: m.streaming_tool_calls_unreliable || false, max_output_tokens: m.max_output_tokens ? String(m.max_output_tokens) : '', request_timeout: m.request_timeout ? String(m.request_timeout) : '', temperature: m.temperature !== null && m.temperature !== undefined ? String(m.temperature) : '' });
                                                     setShowAddModel(true);
                                                 }} style={{ fontSize: '12px' }}>✏️ {t('enterprise.tools.edit')}</button>
                                                 <button className="btn btn-ghost" onClick={() => deleteModel.mutate({ id: m.id })} style={{ color: 'var(--error)' }}>{t('common.delete')}</button>

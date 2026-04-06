@@ -114,6 +114,134 @@ async def get_chat_history(
     return out
 
 
+def _parse_text_tool_calls(text: str) -> list[dict]:
+    """Parse tool calls from text format like [TOOL_CALL] {tool => "name", args => {...}}.
+
+    Returns list of {"name": str, "args": dict}.
+    """
+    import re
+
+    results = []
+
+    # Pattern 1: [TOOL_CALL] {tool => "name", args => {...}}
+    pattern1 = r'\[TOOL_CALL\]\s*\{\s*tool\s*=>\s*["\']?(\w+)["\']?\s*,\s*args\s*=>\s*(\{[^}]*\})\s*\}'
+    for match in re.finditer(pattern1, text, re.DOTALL | re.IGNORECASE):
+        tool_name = match.group(1)
+        args_str = match.group(2)
+        try:
+            # Convert Ruby-style hash to JSON: --key "value" -> "key": "value"
+            args = _parse_ruby_style_args(args_str)
+            results.append({"name": tool_name, "args": args})
+        except Exception as e:
+            logger.warning(f"[ToolParse] Failed to parse args: {args_str[:100]}, error: {e}")
+
+    # Pattern 2: Simpler format detection
+    if not results:
+        # Check for common tool names in text
+        tool_patterns = [
+            (r"send_channel_file\s*\([^)]*\)", "send_channel_file"),
+            (r"send_file\s*\([^)]*\)", "send_channel_file"),
+            (r"list_files\s*\([^)]*\)", "list_files"),
+            (r"read_file\s*\([^)]*\)", "read_file"),
+            (r"write_file\s*\([^)]*\)", "write_file"),
+        ]
+        for pattern, tool_name in tool_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                # Try to extract basic args
+                args = _extract_simple_args(text, tool_name)
+                if args:
+                    results.append({"name": tool_name, "args": args})
+                    break
+
+    return results
+
+
+def _parse_ruby_style_args(args_str: str) -> dict:
+    """Parse Ruby-style args like --key "value" into dict."""
+    import re
+
+    args = {}
+
+    # Remove outer braces if present
+    args_str = args_str.strip()
+    if args_str.startswith("{") and args_str.endswith("}"):
+        args_str = args_str[1:-1]
+
+    # Pattern: --key "value" or --key 'value'
+    pattern = r'--(\w+)\s+["\']([^"\']*)["\']'
+    for match in re.finditer(pattern, args_str):
+        key = match.group(1)
+        value = match.group(2)
+        args[key] = value
+
+    # Also try key: "value" format
+    pattern2 = r'["\']?(\w+)["\']?\s*:\s*["\']([^"\']*)["\']'
+    for match in re.finditer(pattern2, args_str):
+        key = match.group(1)
+        value = match.group(2)
+        if key not in args:
+            args[key] = value
+
+    return args
+
+
+def _extract_simple_args(text: str, tool_name: str) -> dict:
+    """Extract simple arguments from text for common tools."""
+    import re
+
+    args = {}
+
+    if tool_name == "send_channel_file":
+        # Look for file_path pattern
+        file_match = re.search(r'file_path["\']?\s*[:=]\s*["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if file_match:
+            args["file_path"] = file_match.group(1)
+
+        # Look for member_name pattern
+        name_match = re.search(r'member_name["\']?\s*[:=]\s*["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if name_match:
+            args["member_name"] = name_match.group(1)
+
+        # Look for message pattern
+        msg_match = re.search(r'message["\']?\s*[:=]\s*["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if msg_match:
+            args["message"] = msg_match.group(1)
+
+    elif tool_name == "list_files":
+        path_match = re.search(r'path["\']?\s*[:=]\s*["\']([^"\']*)["\']', text, re.IGNORECASE)
+        if path_match:
+            args["path"] = path_match.group(1)
+
+    elif tool_name in ("read_file", "write_file"):
+        path_match = re.search(r'path["\']?\s*[:=]\s*["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if path_match:
+            args["path"] = path_match.group(1)
+
+    return args
+
+
+def _remove_tool_call_text(text: str) -> str:
+    """Remove [TOOL_CALL] blocks from text."""
+    import re
+
+    # Remove [TOOL_CALL] and everything until the closing }}
+    # Match from [TOOL_CALL] to the end of the closing }}
+    cleaned = re.sub(r"\[TOOL_CALL\]\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*", "", text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Also remove any remaining standalone } from incomplete parsing
+    if cleaned.strip() == "}":
+        cleaned = ""
+
+    # Fallback: if still contains TOOL_CALL pattern, remove everything from [TOOL_CALL] onwards
+    if "[TOOL_CALL]" in cleaned.upper():
+        idx = cleaned.upper().find("[TOOL_CALL]")
+        cleaned = cleaned[:idx]
+
+    # Clean up extra whitespace
+    cleaned = re.sub(r"\n\s*\n", "\n\n", cleaned).strip()
+    return cleaned
+
+
 async def call_llm(
     model: LLMModel,
     messages: list[dict],
@@ -337,8 +465,101 @@ async def call_llm(
             else:
                 _all_content_accumulated = response.content
 
-        # If no tool calls, return the final content (accumulated + current round)
+        # If no tool calls, check for text-based tool calls (models like MiniMax that don't support native function calling)
         if not response.tool_calls:
+            _check_content = _all_content_accumulated or response.content or ""
+
+            # Only parse text-based tool calls for models marked as unreliable
+            _should_parse_text = getattr(model, "streaming_tool_calls_unreliable", False)
+
+            # Also auto-detect for known problematic providers (MiniMax, etc.)
+            if not _should_parse_text and hasattr(model, "provider"):
+                _problematic_providers = {"minimax", "baidu"}
+                if model.provider.lower() in _problematic_providers:
+                    _should_parse_text = True
+                    logger.info(
+                        f"[LLM] Auto-detected problematic provider '{model.provider}', enabling text tool parsing"
+                    )
+
+            _parsed_tool_calls = []
+            if _should_parse_text:
+                # Parse [TOOL_CALL] format from text
+                _parsed_tool_calls = _parse_text_tool_calls(_check_content)
+
+            if _parsed_tool_calls:
+                logger.info(
+                    f"[LLM] No native tool_calls but parsed {len(_parsed_tool_calls)} from text in round {round_i + 1}"
+                )
+                # Execute parsed tool calls
+                for _ptc in _parsed_tool_calls:
+                    _tool_name = _ptc.get("name", "")
+                    _tool_args = _ptc.get("args", {})
+                    logger.info(f"[LLM] Executing parsed tool: {_tool_name}({_tool_args})")
+
+                    # Notify client about tool call
+                    if on_tool_call:
+                        try:
+                            await on_tool_call(
+                                {
+                                    "name": _tool_name,
+                                    "args": _tool_args,
+                                    "status": "running",
+                                }
+                            )
+                        except Exception:
+                            pass
+
+                    # Execute the tool
+                    _tool_result = await execute_tool(
+                        _tool_name,
+                        _tool_args,
+                        agent_id=agent_id,
+                        user_id=user_id or agent_id,
+                        session_id=session_id,
+                    )
+                    logger.info(f"[LLM] Parsed tool result: {_tool_result[:100] if _tool_result else 'empty'}")
+
+                    # Notify client about result
+                    if on_tool_call:
+                        try:
+                            await on_tool_call(
+                                {
+                                    "name": _tool_name,
+                                    "args": _tool_args,
+                                    "status": "done",
+                                    "result": _tool_result,
+                                }
+                            )
+                        except Exception:
+                            pass
+
+                    # Clean the tool call syntax from response
+                    _cleaned_content = _remove_tool_call_text(_check_content)
+
+                    # Check if tool execution failed
+                    _is_error = (
+                        "error" in _tool_result.lower()
+                        or _tool_result.startswith("Error:")
+                        or _tool_result.startswith("Tool execution error")
+                    )
+
+                    # Return cleaned Agent text (not tool result) if successful
+                    # Return error message if failed
+                    if _is_error:
+                        logger.warning(f"[LLM] Parsed tool execution failed: {_tool_result[:100]}")
+                        _final_result = (
+                            _cleaned_content + "\n\n⚠️ " + _tool_result if _cleaned_content else "⚠️ " + _tool_result
+                        )
+                    else:
+                        # Tool succeeded - return Agent's original text only
+                        _final_result = _cleaned_content if _cleaned_content else "✅ 已完成"
+
+                    if agent_id and _accumulated_tokens > 0:
+                        await record_token_usage(agent_id, _accumulated_tokens)
+                    await client.close()
+                    return _final_result
+
+            # No tool calls found, return final content
             logger.info(
                 f"[LLM] No tool calls in round {round_i + 1}, finishing. accumulated_len={len(_all_content_accumulated)}, response_content_len={len(response.content or '')}"
             )

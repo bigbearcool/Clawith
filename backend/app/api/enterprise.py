@@ -20,9 +20,16 @@ from app.models.agent import Agent
 from app.models.llm import LLMModel
 from app.models.audit import AuditLog, ApprovalRequest, EnterpriseInfo
 from app.schemas.schemas import (
-    ApprovalAction, ApprovalRequestOut, AuditLogOut, EnterpriseInfoOut,
-    EnterpriseInfoUpdate, LLMModelCreate, LLMModelOut, LLMModelUpdate,
-    IdentityProviderOut, UserInviteRequest
+    ApprovalAction,
+    ApprovalRequestOut,
+    AuditLogOut,
+    EnterpriseInfoOut,
+    EnterpriseInfoUpdate,
+    LLMModelCreate,
+    LLMModelOut,
+    LLMModelUpdate,
+    IdentityProviderOut,
+    UserInviteRequest,
 )
 from app.services.autonomy_service import autonomy_service
 from app.services.enterprise_sync import enterprise_sync_service
@@ -34,6 +41,7 @@ router = APIRouter(prefix="/enterprise", tags=["enterprise"])
 
 
 # ─── Public: Check Email Exists ────────────────────────
+
 
 class CheckEmailRequest(BaseModel):
     email: str
@@ -50,12 +58,10 @@ async def check_email_exists(
     Only returns a boolean; does not expose any user data.
     """
     from app.models.user import Identity
-    result = await db.execute(
-        select(Identity).where(Identity.email == data.email.strip().lower())
-    )
+
+    result = await db.execute(select(Identity).where(Identity.email == data.email.strip().lower()))
     exists = result.scalar_one_or_none() is not None
     return {"exists": exists}
-
 
 
 @router.get("/llm-providers")
@@ -85,7 +91,7 @@ async def test_llm_model(
     from app.services.llm_client import create_llm_client
 
     # Resolve API key: use provided key, or look up from stored model
-    api_key = data.api_key if data.api_key and not data.api_key.startswith('****') else None
+    api_key = data.api_key if data.api_key and not data.api_key.startswith("****") else None
     if not api_key and data.model_id:
         result = await db.execute(select(LLMModel).where(LLMModel.id == data.model_id))
         existing = result.scalar_one_or_none()
@@ -104,6 +110,7 @@ async def test_llm_model(
         )
         # Simple test: ask model to say "ok"
         from app.services.llm_client import LLMMessage
+
         response = await client.complete(
             messages=[LLMMessage(role="user", content="Say 'ok' and nothing else.")],
             max_tokens=16,
@@ -114,7 +121,6 @@ async def test_llm_model(
     except Exception as e:
         latency_ms = int((time.time() - start) * 1000)
         return {"success": False, "latency_ms": latency_ms, "error": str(e)[:500]}
-
 
 
 @router.get("/llm-models", response_model=list[LLMModelOut])
@@ -163,6 +169,7 @@ async def add_llm_model(
         max_tokens_per_day=data.max_tokens_per_day,
         enabled=data.enabled,
         supports_vision=data.supports_vision,
+        streaming_tool_calls_unreliable=data.streaming_tool_calls_unreliable,
         max_output_tokens=data.max_output_tokens,
         request_timeout=data.request_timeout,
         tenant_id=uuid.UUID(tid) if tid else None,
@@ -187,10 +194,9 @@ async def remove_llm_model(
 
     # Check if any agents reference this model
     from sqlalchemy import or_
+
     ref_result = await db.execute(
-        select(Agent.name).where(
-            or_(Agent.primary_model_id == model_id, Agent.fallback_model_id == model_id)
-        )
+        select(Agent.name).where(or_(Agent.primary_model_id == model_id, Agent.fallback_model_id == model_id))
     )
     agent_names = [row[0] for row in ref_result.all()]
 
@@ -205,12 +211,8 @@ async def remove_llm_model(
 
     # Nullify FK references in agents before deleting
     if agent_names:
-        await db.execute(
-            update(Agent).where(Agent.primary_model_id == model_id).values(primary_model_id=None)
-        )
-        await db.execute(
-            update(Agent).where(Agent.fallback_model_id == model_id).values(fallback_model_id=None)
-        )
+        await db.execute(update(Agent).where(Agent.primary_model_id == model_id).values(primary_model_id=None))
+        await db.execute(update(Agent).where(Agent.fallback_model_id == model_id).values(fallback_model_id=None))
     await db.delete(model)
     await db.commit()
 
@@ -235,9 +237,9 @@ async def update_llm_model(
             model.model = data.model
         if data.label is not None:
             model.label = data.label
-        if hasattr(data, 'base_url') and data.base_url is not None:
+        if hasattr(data, "base_url") and data.base_url is not None:
             model.base_url = data.base_url
-        if data.api_key and data.api_key.strip() and not data.api_key.startswith('****'):  # Skip masked values
+        if data.api_key and data.api_key.strip() and not data.api_key.startswith("****"):  # Skip masked values
             model.api_key_encrypted = data.api_key.strip()
         if data.temperature is not None:
             model.temperature = data.temperature
@@ -245,11 +247,13 @@ async def update_llm_model(
             model.max_tokens_per_day = data.max_tokens_per_day
         if data.enabled is not None:
             model.enabled = data.enabled
-        if hasattr(data, 'supports_vision') and data.supports_vision is not None:
+        if hasattr(data, "supports_vision") and data.supports_vision is not None:
             model.supports_vision = data.supports_vision
-        if hasattr(data, 'max_output_tokens') and data.max_output_tokens is not None:
+        if hasattr(data, "streaming_tool_calls_unreliable") and data.streaming_tool_calls_unreliable is not None:
+            model.streaming_tool_calls_unreliable = data.streaming_tool_calls_unreliable
+        if hasattr(data, "max_output_tokens") and data.max_output_tokens is not None:
             model.max_output_tokens = data.max_output_tokens
-        if hasattr(data, 'request_timeout') and data.request_timeout is not None:
+        if hasattr(data, "request_timeout") and data.request_timeout is not None:
             model.request_timeout = data.request_timeout
 
         await db.commit()
@@ -261,6 +265,7 @@ async def update_llm_model(
 
 
 # ─── Enterprise Info ────────────────────────────────────
+
 
 @router.get("/info", response_model=list[EnterpriseInfoOut])
 async def list_enterprise_info(
@@ -290,6 +295,7 @@ async def update_enterprise_info(
 
 # ─── Approvals ──────────────────────────────────────────
 
+
 @router.get("/approvals", response_model=list[ApprovalRequestOut])
 async def list_approvals(
     tenant_id: str | None = None,
@@ -306,9 +312,7 @@ async def list_approvals(
         query = query.where(ApprovalRequest.agent_id.in_(tenant_agent_ids))
     # Non-admins further restricted to their own agents
     if current_user.role != "platform_admin":
-        query = query.where(ApprovalRequest.agent_id.in_(
-            select(Agent.id).where(Agent.creator_id == current_user.id)
-        ))
+        query = query.where(ApprovalRequest.agent_id.in_(select(Agent.id).where(Agent.creator_id == current_user.id)))
     if status_filter:
         query = query.where(ApprovalRequest.status == status_filter)
     query = query.order_by(ApprovalRequest.created_at.desc())
@@ -340,15 +344,14 @@ async def resolve_approval(
 ):
     """Approve or reject a pending approval request."""
     try:
-        approval = await autonomy_service.resolve_approval(
-            db, approval_id, current_user, data.action
-        )
+        approval = await autonomy_service.resolve_approval(db, approval_id, current_user, data.action)
         return ApprovalRequestOut.model_validate(approval)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 # ─── Audit Logs ─────────────────────────────────────────
+
 
 @router.get("/audit-logs", response_model=list[AuditLogOut])
 async def list_audit_logs(
@@ -373,6 +376,7 @@ async def list_audit_logs(
 
 # ─── Dashboard Stats ────────────────────────────────────
 
+
 @router.get("/stats")
 async def get_enterprise_stats(
     tenant_id: str | None = None,
@@ -396,18 +400,12 @@ async def get_enterprise_stats(
         agent_q = agent_q.where(Agent.tenant_id == tid)
         user_q = user_q.where(User.tenant_id == tid)
         # For approvals, we only see requests for agents in this tenant
-        approval_q = approval_q.where(ApprovalRequest.agent_id.in_(
-            select(Agent.id).where(Agent.tenant_id == tid)
-        ))
+        approval_q = approval_q.where(ApprovalRequest.agent_id.in_(select(Agent.id).where(Agent.tenant_id == tid)))
 
     total_agents = await db.execute(agent_q)
-    running_agents = await db.execute(
-        agent_q.where(Agent.status == "running")
-    )
+    running_agents = await db.execute(agent_q.where(Agent.status == "running"))
     total_users = await db.execute(user_q)
-    pending_approvals = await db.execute(
-        approval_q.where(ApprovalRequest.status == "pending")
-    )
+    pending_approvals = await db.execute(approval_q.where(ApprovalRequest.status == "pending"))
 
     return {
         "total_agents": total_agents.scalar() or 0,
@@ -490,9 +488,8 @@ async def update_tenant_quotas(
     if data.min_heartbeat_interval_minutes is not None:
         tenant.min_heartbeat_interval_minutes = data.min_heartbeat_interval_minutes
         from app.services.quota_guard import enforce_heartbeat_floor
-        adjusted_count = await enforce_heartbeat_floor(
-            tenant.id, floor=data.min_heartbeat_interval_minutes, db=db
-        )
+
+        adjusted_count = await enforce_heartbeat_floor(tenant.id, floor=data.min_heartbeat_interval_minutes, db=db)
 
     # Handle trigger limit fields
     if data.default_max_triggers is not None:
@@ -568,14 +565,9 @@ async def update_email_templates_endpoint(
     # Validate that only known scenario keys are provided
     for key in data.templates:
         if key not in EMAIL_TEMPLATE_VARIABLES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown email template scenario: {key}"
-            )
+            raise HTTPException(status_code=400, detail=f"Unknown email template scenario: {key}")
 
-    result = await db.execute(
-        select(SystemSetting).where(SystemSetting.key == "email_templates")
-    )
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key == "email_templates"))
     setting = result.scalar_one_or_none()
     if setting:
         setting.value = data.templates
@@ -600,9 +592,7 @@ async def get_notification_bar_public(
     db: AsyncSession = Depends(get_db),
 ):
     """Public (no auth) endpoint to read the notification bar config."""
-    result = await db.execute(
-        select(SystemSetting).where(SystemSetting.key == "notification_bar")
-    )
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key == "notification_bar"))
     setting = result.scalar_one_or_none()
     if not setting or not setting.value:
         return {"enabled": False, "text": ""}
@@ -623,7 +613,11 @@ async def get_system_setting(
     setting = result.scalar_one_or_none()
     if not setting:
         return {"key": key, "value": {}}
-    return {"key": setting.key, "value": setting.value, "updated_at": setting.updated_at.isoformat() if setting.updated_at else None}
+    return {
+        "key": setting.key,
+        "value": setting.value,
+        "updated_at": setting.updated_at.isoformat() if setting.updated_at else None,
+    }
 
 
 @router.put("/system-settings/{key}")
@@ -655,6 +649,7 @@ async def update_system_setting(
 
 # ─── SSO Derived State Helper ───────────────────────────
 
+
 async def _sync_tenant_sso_state(db: AsyncSession, tenant_id: uuid.UUID):
     """Recompute tenant.sso_enabled based on channel-level sso_login_enabled flags.
 
@@ -666,6 +661,7 @@ async def _sync_tenant_sso_state(db: AsyncSession, tenant_id: uuid.UUID):
     Raises HTTPException(400) if IP mode and another tenant already owns the sso_domain.
     """
     from app.models.tenant import Tenant
+
     count_result = await db.execute(
         select(func.count(IdentityProvider.id)).where(
             IdentityProvider.tenant_id == tenant_id,
@@ -691,11 +687,7 @@ async def _sync_tenant_sso_state(db: AsyncSession, tenant_id: uuid.UUID):
         if is_ip:
             # IP mode: first clear ALL other tenants' sso_domain, then set for this tenant
             # (unique constraint - only one tenant can hold the IP domain)
-            await db.execute(
-                update(Tenant)
-                .where(Tenant.id != tenant_id)
-                .values(sso_domain=None, sso_enabled=False)
-            )
+            await db.execute(update(Tenant).where(Tenant.id != tenant_id).values(sso_domain=None, sso_enabled=False))
             logger.info(f"[SSO] IP mode: cleared sso_domain for all other tenants, setting for tenant_id={tenant_id}")
 
         tenant.sso_domain = sso_base
@@ -716,9 +708,7 @@ async def _regenerate_all_sso_domains(db: AsyncSession):
     is_ip = platform_service.is_ip_address(host)
 
     # Fetch all tenants; put SSO-enabled ones first so they win the IP slot
-    all_tenants_result = await db.execute(
-        select(Tenant).order_by(Tenant.sso_enabled.desc(), Tenant.created_at.asc())
-    )
+    all_tenants_result = await db.execute(select(Tenant).order_by(Tenant.sso_enabled.desc(), Tenant.created_at.asc()))
     tenants = all_tenants_result.scalars().all()
 
     for i, tenant in enumerate(tenants):
@@ -740,6 +730,7 @@ async def _regenerate_all_sso_domains(db: AsyncSession):
 
 
 # ─── Identity Providers ─────────────────────────────────
+
 
 @router.get("/identity-providers", response_model=list[IdentityProviderOut])
 async def list_identity_providers(
@@ -765,6 +756,7 @@ async def list_identity_providers(
             raise HTTPException(status_code=400, detail="tenant_id is required for identity providers")
     else:
         import uuid as _uuid
+
         query = query.where(IdentityProvider.tenant_id == _uuid.UUID(tid))
 
     result = await db.execute(query)
@@ -787,11 +779,12 @@ class IdentityProviderCreate(BaseModel):
 
 class OAuth2Config(BaseModel):
     """OAuth2 provider configuration with friendly field names."""
-    app_id: str | None = None          # Alias for client_id
-    app_secret: str | None = None       # Alias for client_secret
-    authorize_url: str | None = None    # OAuth2 authorize endpoint
-    token_url: str | None = None        # OAuth2 token endpoint
-    user_info_url: str | None = None    # OAuth2 user info endpoint
+
+    app_id: str | None = None  # Alias for client_id
+    app_secret: str | None = None  # Alias for client_secret
+    authorize_url: str | None = None  # OAuth2 authorize endpoint
+    token_url: str | None = None  # OAuth2 token endpoint
+    user_info_url: str | None = None  # OAuth2 user info endpoint
     scope: str | None = "openid profile email"
 
     def to_config_dict(self) -> dict:
@@ -828,6 +821,7 @@ class OAuth2Config(BaseModel):
 
 class IdentityProviderOAuth2Create(BaseModel):
     """Simplified OAuth2 provider creation with dedicated fields."""
+
     provider_type: str = "oauth2"
     name: str
     is_active: bool = True
@@ -867,6 +861,7 @@ def normalize_oauth2_config(config: dict) -> dict:
         return normalized
     return config
 
+
 def validate_provider_config(provider_type: str, config: dict):
     """Validate identity provider config. Specific field checks are handled by the frontend."""
     if not isinstance(config, dict):
@@ -883,7 +878,7 @@ async def create_identity_provider(
     """Create a new identity provider (Admin only)."""
     # Validate config
     validate_provider_config(data.provider_type, data.config)
-    
+
     # Validate and determine tenant_id
     tid = data.tenant_id
     if current_user.role == "platform_admin":
@@ -899,12 +894,12 @@ async def create_identity_provider(
 
     if not tid:
         raise HTTPException(status_code=400, detail="tenant_id is required to create an identity provider")
-        
+
     if data.sso_login_enabled:
         if not await sso_service.validate_sso_enablement(db, tid):
-             raise HTTPException(
+            raise HTTPException(
                 status_code=400,
-                detail="IP address does not support multi-tenant SSO. Another tenant already has SSO enabled."
+                detail="IP address does not support multi-tenant SSO. Another tenant already has SSO enabled.",
             )
 
     provider = IdentityProvider(
@@ -913,7 +908,7 @@ async def create_identity_provider(
         is_active=data.is_active,
         sso_login_enabled=data.sso_login_enabled,
         config=data.config,
-        tenant_id=tid
+        tenant_id=tid,
     )
     db.add(provider)
     await db.commit()
@@ -959,11 +954,7 @@ async def create_oauth2_provider(
         raise HTTPException(status_code=400, detail="tenant_id is required to create an identity provider")
 
     provider = IdentityProvider(
-        provider_type="oauth2",
-        name=data.name,
-        is_active=data.is_active,
-        config=config,
-        tenant_id=tid
+        provider_type="oauth2", name=data.name, is_active=data.is_active, config=config, tenant_id=tid
     )
     db.add(provider)
     await db.commit()
@@ -973,6 +964,7 @@ async def create_oauth2_provider(
 
 class OAuth2ConfigUpdate(BaseModel):
     """OAuth2 provider configuration update with dedicated fields."""
+
     name: str | None = None
     is_active: bool | None = None
     app_id: str | None = None
@@ -1009,7 +1001,9 @@ async def update_oauth2_provider(
         provider.is_active = data.is_active
 
     # Update config fields
-    if any([data.app_id, data.app_secret is not None, data.authorize_url, data.token_url, data.user_info_url, data.scope]):
+    if any(
+        [data.app_id, data.app_secret is not None, data.authorize_url, data.token_url, data.user_info_url, data.scope]
+    ):
         current_config = provider.config.copy()
 
         if data.app_id is not None:
@@ -1060,10 +1054,10 @@ async def update_identity_provider(
     provider = result.scalar_one_or_none()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-        
+
     if current_user.role != "platform_admin" and provider.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to update this provider")
-        
+
     if data.name is not None:
         provider.name = data.name
     if data.is_active is not None:
@@ -1074,19 +1068,19 @@ async def update_identity_provider(
             if not await sso_service.validate_sso_enablement(db, provider.tenant_id):
                 raise HTTPException(
                     status_code=400,
-                    detail="IP address does not support multi-tenant SSO. Another tenant already has SSO enabled."
+                    detail="IP address does not support multi-tenant SSO. Another tenant already has SSO enabled.",
                 )
         provider.sso_login_enabled = data.sso_login_enabled
     if data.config is not None:
         # Merge config
         new_config = provider.config.copy()
         new_config.update(data.config)
-        
+
         # Validate merged config
         validate_provider_config(provider.provider_type, new_config)
-        
+
         provider.config = new_config
-        
+
     await db.commit()
     await db.refresh(provider)
 
@@ -1095,6 +1089,7 @@ async def update_identity_provider(
     if data.sso_login_enabled is not None and provider.tenant_id:
         await _sync_tenant_sso_state(db, provider.tenant_id)
         from app.models.tenant import Tenant
+
         tenant_result = await db.execute(select(Tenant).where(Tenant.id == provider.tenant_id))
         t = tenant_result.scalar_one_or_none()
         if t:
@@ -1116,20 +1111,17 @@ async def delete_identity_provider(
     provider = result.scalar_one_or_none()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-        
+
     if current_user.role != "platform_admin" and provider.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this provider")
-        
+
     try:
         # Nullify references in synced org data before deleting the provider
         from sqlalchemy import update
-        await db.execute(
-            update(OrgMember).where(OrgMember.provider_id == provider_id).values(provider_id=None)
-        )
-        await db.execute(
-            update(OrgDepartment).where(OrgDepartment.provider_id == provider_id).values(provider_id=None)
-        )
-        
+
+        await db.execute(update(OrgMember).where(OrgMember.provider_id == provider_id).values(provider_id=None))
+        await db.execute(update(OrgDepartment).where(OrgDepartment.provider_id == provider_id).values(provider_id=None))
+
         await db.delete(provider)
         await db.commit()
     except SQLAlchemyError as e:
@@ -1160,7 +1152,7 @@ async def list_org_departments(
     #    - auto-scope to current_user.tenant_id when it is set (applies to ALL roles)
     #    - only a platform_admin with NO tenant_id in token can query unrestricted
     effective_tenant_id = str(current_user.tenant_id) if current_user.tenant_id else None
-    is_global_admin = (current_user.role == "platform_admin" and not effective_tenant_id)
+    is_global_admin = current_user.role == "platform_admin" and not effective_tenant_id
 
     if tenant_id:
         # Validate requested tenant against user context
@@ -1170,9 +1162,11 @@ async def list_org_departments(
         # Auto-scope: use the user's own tenant when available
         tenant_id = effective_tenant_id  # None only for true global admin
 
-    query = select(OrgDepartment, IdentityProvider.name.label("provider_name"), IdentityProvider.provider_type).outerjoin(
-        IdentityProvider, OrgDepartment.provider_id == IdentityProvider.id
-    ).where(OrgDepartment.status == "active")
+    query = (
+        select(OrgDepartment, IdentityProvider.name.label("provider_name"), IdentityProvider.provider_type)
+        .outerjoin(IdentityProvider, OrgDepartment.provider_id == IdentityProvider.id)
+        .where(OrgDepartment.status == "active")
+    )
     if tenant_id:
         query = query.where(OrgDepartment.tenant_id == uuid.UUID(tenant_id))
     if provider_id:
@@ -1207,8 +1201,8 @@ async def list_org_departments(
     }
 
 
-
 from sqlalchemy import or_
+
 
 @router.get("/org/members")
 async def list_org_members(
@@ -1229,7 +1223,7 @@ async def list_org_members(
     #    - auto-scope to current_user.tenant_id when it is set (applies to ALL roles)
     #    - only a platform_admin with NO tenant_id in token can query unrestricted
     effective_tenant_id = str(current_user.tenant_id) if current_user.tenant_id else None
-    is_global_admin = (current_user.role == "platform_admin" and not effective_tenant_id)
+    is_global_admin = current_user.role == "platform_admin" and not effective_tenant_id
 
     if tenant_id:
         # Validate requested tenant against user context
@@ -1239,9 +1233,11 @@ async def list_org_members(
         # Auto-scope: use the user's own tenant when available
         tenant_id = effective_tenant_id  # None only for true global admin
 
-    query = select(OrgMember, IdentityProvider.name.label("provider_name"), IdentityProvider.provider_type).outerjoin(
-        IdentityProvider, OrgMember.provider_id == IdentityProvider.id
-    ).where(OrgMember.status == "active")
+    query = (
+        select(OrgMember, IdentityProvider.name.label("provider_name"), IdentityProvider.provider_type)
+        .outerjoin(IdentityProvider, OrgMember.provider_id == IdentityProvider.id)
+        .where(OrgMember.status == "active")
+    )
     if tenant_id:
         query = query.where(OrgMember.tenant_id == uuid.UUID(tenant_id))
     if department_id:
@@ -1263,12 +1259,7 @@ async def list_org_members(
             # Fallback: exact match
             query = query.where(OrgMember.department_id == uuid.UUID(department_id))
     if provider_id:
-        query = query.where(
-            or_(
-                OrgMember.provider_id == uuid.UUID(provider_id),
-                OrgMember.provider_id.is_(None)
-            )
-        )
+        query = query.where(or_(OrgMember.provider_id == uuid.UUID(provider_id), OrgMember.provider_id.is_(None)))
     if search:
         query = query.where(
             or_(
@@ -1334,8 +1325,8 @@ from app.models.invitation_code import InvitationCode
 
 
 class InvitationCodeCreate(BaseModel):
-    count: int = 1       # how many codes to generate
-    max_uses: int = 1    # max registrations per code
+    count: int = 1  # how many codes to generate
+    max_uses: int = 1  # max registrations per code
 
 
 def _require_tenant_admin(current_user: User) -> None:
@@ -1359,7 +1350,7 @@ async def create_invitation_codes(
 
     codes_created = []
     for _ in range(min(data.count, 100)):  # cap at 100 per batch
-        code_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        code_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
         code = InvitationCode(
             code=code_str,
             tenant_id=current_user.tenant_id,
@@ -1385,29 +1376,29 @@ async def invite_users(
     _require_tenant_admin(current_user)
     if not data.emails:
         raise HTTPException(status_code=400, detail="No emails provided")
-        
+
     import random
     import string
     from app.services.system_email_service import send_company_invitation_email
     from app.services.platform_service import platform_service
     from app.models.tenant import Tenant
-    
+
     tenant_result = await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
         raise HTTPException(status_code=404, detail="Company not found")
 
     base_url = await platform_service.get_public_base_url(db, request=request)
-    
+
     invited_count = 0
     codes = []
-    
+
     for email in data.emails:
         email = email.lower().strip()
         if not email:
             continue
-            
-        code_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+        code_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
         code = InvitationCode(
             code=code_str,
             tenant_id=current_user.tenant_id,
@@ -1416,11 +1407,11 @@ async def invite_users(
         )
         db.add(code)
         codes.append(code)
-        
+
         invite_url = f"{base_url}/login?code={code_str}&email={email}"
-        
+
         inviter_name = current_user.display_name or current_user.username
-        
+
         # Use background task to send email
         background_tasks.add_task(
             send_company_invitation_email,
@@ -1433,7 +1424,7 @@ async def invite_users(
 
     if invited_count > 0:
         await db.commit()
-        
+
     return {"invited": invited_count, "message": "Invitations sent successfully"}
 
 
@@ -1461,9 +1452,7 @@ async def list_invitation_codes(
     total = total_result.scalar() or 0
 
     offset = (max(page, 1) - 1) * page_size
-    result = await db.execute(
-        stmt.order_by(InvitationCode.created_at.desc()).offset(offset).limit(page_size)
-    )
+    result = await db.execute(stmt.order_by(InvitationCode.created_at.desc()).offset(offset).limit(page_size))
     codes = result.scalars().all()
     return {
         "items": [
@@ -1481,7 +1470,6 @@ async def list_invitation_codes(
         "page": page,
         "page_size": page_size,
     }
-
 
 
 @router.get("/invitation-codes/export")
@@ -1506,13 +1494,15 @@ async def export_invitation_codes_csv(
     writer = csv.writer(output)
     writer.writerow(["Code", "Max Uses", "Used Count", "Active", "Created At"])
     for c in codes:
-        writer.writerow([
-            c.code,
-            c.max_uses,
-            c.used_count,
-            "Yes" if c.is_active else "No",
-            c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else "",
-        ])
+        writer.writerow(
+            [
+                c.code,
+                c.max_uses,
+                c.used_count,
+                "Yes" if c.is_active else "No",
+                c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else "",
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(
@@ -1531,6 +1521,7 @@ async def deactivate_invitation_code(
     """Deactivate an invitation code (must belong to current user's company)."""
     _require_tenant_admin(current_user)
     import uuid as _uuid
+
     result = await db.execute(
         select(InvitationCode).where(
             InvitationCode.id == _uuid.UUID(code_id),

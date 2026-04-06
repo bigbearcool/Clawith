@@ -2507,10 +2507,9 @@ async def _send_channel_file(agent_id: uuid.UUID, ws: Path, arguments: dict) -> 
         file_rel = str(file_path.resolve().relative_to(base_abs))
     except ValueError:
         file_rel = rel_path
-    from app.config import get_settings as _gs
+    from app.core.public_url import get_public_base_url_sync
 
-    _s = _gs()
-    base_url = getattr(_s, "BASE_URL", "").rstrip("/") or ""
+    base_url = get_public_base_url_sync()
     download_url = f"{base_url}/api/agents/{aid}/files/download?path={file_rel}"
     msg = f"File ready: [{file_path.name}]({download_url})"
     if accompany_msg:
@@ -2607,10 +2606,9 @@ async def _send_file_via_feishu(agent_id, config, file_path: Path, member_name: 
     except Exception as e:
         # If upload fails, try sending a download link as fallback
         import json as _j
-        from app.config import get_settings as _gs
+        from app.core.public_url import get_public_base_url_sync
 
-        _s = _gs()
-        base_url = getattr(_s, "BASE_URL", "").rstrip("/") or ""
+        base_url = get_public_base_url_sync()
         base_abs = (WORKSPACE_ROOT / str(agent_id)).resolve()
         try:
             _rel = str(file_path.resolve().relative_to(base_abs))

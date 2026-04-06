@@ -729,10 +729,9 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 except Exception as _upload_err:
                     # Fallback: send a download link when upload permission is not granted
                     from pathlib import Path as _P
-                    from app.config import get_settings as _gs_fallback
+                    from app.core.public_url import get_public_base_url_sync
 
-                    _fs = _gs_fallback()
-                    _base_url = getattr(_fs, "BASE_URL", "").rstrip("/") or ""
+                    _base_url = get_public_base_url_sync()
                     _fp = _P(file_path)
                     _ws_root = _P(_fs.AGENT_DATA_DIR)
                     try:
@@ -872,6 +871,18 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 MAX_CARD_CONTENT_LENGTH = 28000
                 # body = answer_text + ("▌" if streaming and answer_text else ("..." if streaming else ""))
                 body = answer_text  # No cursor, ever
+
+                # Filter out tool call syntax from card content
+                if "[TOOL_CALL]" in body.upper():
+                    import re as _re
+
+                    # Remove [TOOL_CALL] blocks
+                    body = _re.sub(r"\[TOOL_CALL\].*?(?=\n\n|$)", "", body, flags=_re.DOTALL | _re.IGNORECASE)
+                    body = body.strip()
+                    # If only } remains, clear it
+                    if body.strip() in ("}", "} "):
+                        body = ""
+
                 if len(body) > MAX_CARD_CONTENT_LENGTH:
                     # Truncate for card, but full content will be sent as plain text later
                     logger.warning(

@@ -8,8 +8,10 @@ from pydantic import BaseModel, EmailStr, Field
 
 # ─── Auth ───────────────────────────────────────────────
 
+
 class UserRegister(BaseModel):
     """Legacy combined registration - kept for backward compatibility."""
+
     username: str = Field(min_length=1, max_length=100)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
@@ -22,6 +24,7 @@ class UserRegister(BaseModel):
 
 class RegisterInitRequest(BaseModel):
     """Step 1: Initialize registration with account credentials."""
+
     username: str = Field(min_length=1, max_length=100)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
@@ -31,22 +34,25 @@ class RegisterInitRequest(BaseModel):
 
 class RegisterInitResponse(BaseModel):
     """Response after step 1 - user created, needs email verification."""
+
     user_id: uuid.UUID
     email: str
     access_token: str
     message: str = "Registration initiated. Please verify your email."
-    user: "UserOut" # Include full user info
+    user: "UserOut"  # Include full user info
     needs_company_setup: bool = True
     target_tenant_id: uuid.UUID | None = None
 
 
 class RegisterCompleteRequest(BaseModel):
     """Step 3: Complete registration after email verification."""
+
     token: str = Field(min_length=6, max_length=512, description="Email verification code")
 
 
 class RegisterCompleteResponse(BaseModel):
     """Response after successful registration completion."""
+
     access_token: str
     token_type: str = "bearer"
     user: "UserOut"
@@ -55,6 +61,7 @@ class RegisterCompleteResponse(BaseModel):
 
 class SSORegisterRequest(BaseModel):
     """SSO registration - completely separate from normal registration."""
+
     provider: str = Field(description="Provider type (feishu, dingtalk, etc.)")
     code: str = Field(description="OAuth authorization code from provider")
     invitation_code: str | None = None
@@ -85,6 +92,7 @@ class ResendVerificationRequest(BaseModel):
 
 class NeedsVerificationResponse(BaseModel):
     """Response when user needs to verify email before continuing."""
+
     needs_verification: bool = True
     email: str
     message: str = "Email already registered but not verified. Please enter the verification code."
@@ -101,6 +109,7 @@ class TokenResponse(BaseModel):
 
 class TenantChoice(BaseModel):
     """Multi-tenant login: tenant selection info."""
+
     tenant_id: uuid.UUID | None
     tenant_name: str
     tenant_slug: str
@@ -108,6 +117,7 @@ class TenantChoice(BaseModel):
 
 class MultiTenantResponse(BaseModel):
     """Response when multiple tenants match the same login identifier."""
+
     requires_tenant_selection: bool = True
     login_identifier: str
     tenants: list[TenantChoice]
@@ -126,6 +136,7 @@ class TenantSwitchResponse(BaseModel):
 
 class IdentityOut(BaseModel):
     """Global identity information."""
+
     id: uuid.UUID
     email: str | None = None
     phone: str | None = None
@@ -201,6 +212,7 @@ class UserUpdate(BaseModel):
 
 
 # ─── Agent ──────────────────────────────────────────────
+
 
 class AgentCreate(BaseModel):
     name: str = Field(min_length=2, max_length=100, description="Agent name, 2-100 characters")
@@ -299,6 +311,7 @@ class AgentUpdate(BaseModel):
 
 class AgentStatusOut(BaseModel):
     """Agent status from state.json."""
+
     agent_id: uuid.UUID
     name: str
     status: str
@@ -309,6 +322,7 @@ class AgentStatusOut(BaseModel):
 
 
 # ─── Task ───────────────────────────────────────────────
+
 
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
@@ -369,6 +383,7 @@ class TaskLogOut(BaseModel):
 
 # ─── LLM ────────────────────────────────────────────────
 
+
 class LLMModelCreate(BaseModel):
     provider: str
     model: str
@@ -379,8 +394,10 @@ class LLMModelCreate(BaseModel):
     max_tokens_per_day: int | None = None
     enabled: bool = True
     supports_vision: bool = False
+    streaming_tool_calls_unreliable: bool = False
     max_output_tokens: int | None = None
     request_timeout: int | None = None
+
 
 class LLMModelUpdate(BaseModel):
     provider: str | None = None
@@ -392,6 +409,7 @@ class LLMModelUpdate(BaseModel):
     max_tokens_per_day: int | None = None
     enabled: bool | None = None
     supports_vision: bool | None = None
+    streaming_tool_calls_unreliable: bool | None = None
     max_output_tokens: int | None = None
     request_timeout: int | None = None
 
@@ -407,6 +425,7 @@ class LLMModelOut(BaseModel):
     max_tokens_per_day: int | None = None
     enabled: bool
     supports_vision: bool = False
+    streaming_tool_calls_unreliable: bool = False
     max_output_tokens: int | None = None
     request_timeout: int | None = None
     created_at: datetime
@@ -415,6 +434,7 @@ class LLMModelOut(BaseModel):
 
 
 # ─── Channel Config ─────────────────────────────────────
+
 
 class ChannelConfigCreate(BaseModel):
     channel_type: str = "feishu"
@@ -443,6 +463,7 @@ class ChannelConfigOut(BaseModel):
 
 # ─── Approval ───────────────────────────────────────────
 
+
 class ApprovalRequestOut(BaseModel):
     id: uuid.UUID
     agent_id: uuid.UUID
@@ -463,8 +484,10 @@ class ApprovalAction(BaseModel):
 
 # ─── Enterprise Info ────────────────────────────────────
 
+
 class UserInviteRequest(BaseModel):
     emails: list[EmailStr] = Field(..., description="List of emails to invite")
+
 
 class EnterpriseInfoUpdate(BaseModel):
     content: dict
@@ -484,6 +507,7 @@ class EnterpriseInfoOut(BaseModel):
 
 # ─── Chat ───────────────────────────────────────────────
 
+
 class ChatMessageOut(BaseModel):
     id: uuid.UUID
     agent_id: uuid.UUID
@@ -502,6 +526,7 @@ class ChatSend(BaseModel):
 
 # ─── Audit Log ──────────────────────────────────────────
 
+
 class AuditLogOut(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID | None = None
@@ -516,6 +541,7 @@ class AuditLogOut(BaseModel):
 
 # ─── Generic ────────────────────────────────────────────
 
+
 class PaginatedResponse(BaseModel):
     items: list
     total: int
@@ -529,6 +555,7 @@ class HealthResponse(BaseModel):
 
 
 # ─── Gateway (OpenClaw) ─────────────────────────────────
+
 
 class GatewayHistoryItem(BaseModel):
     role: str  # "user" or "assistant"
@@ -556,7 +583,6 @@ class GatewayMessageOut(BaseModel):
     history: list[GatewayHistoryItem] = []
 
 
-
 class GatewayPollResponse(BaseModel):
     messages: list[GatewayMessageOut] = []
     relationships: list[GatewayRelationshipItem] = []
@@ -567,12 +593,12 @@ class GatewayReportRequest(BaseModel):
     result: str = Field(min_length=1)
 
 
-
-
 class MessageDestination(BaseModel):
     """Destination for broadcasting a message to a channel/group."""
+
     channel: str  # feishu | wecom | dingtalk
-    group: str     # Group name (matches config name)
+    group: str  # Group name (matches config name)
+
 
 class GatewaySendMessageRequest(BaseModel):
     target: str  # Name of target person or agent
