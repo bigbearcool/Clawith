@@ -1840,6 +1840,59 @@ export default function EnterpriseSettings() {
         setJinaKey('');
     };
 
+    // ─── Tencent Voice API Key (Global)
+    const [tencentVoiceForm, setTencentVoiceForm] = useState({ secret_id: '', secret_key: '' });
+    const [tencentVoiceMasked, setTencentVoiceMasked] = useState<{ id: string; key: string } | null>(null);
+    const [tencentVoiceSaving, setTencentVoiceSaving] = useState(false);
+    
+    useEffect(() => {
+        if (activeTab !== 'llm') return;
+        const token = localStorage.getItem('token');
+        fetch('/api/enterprise/system-settings/tencent_voice_key', { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.json())
+            .then(d => {
+                if (d.value?.secret_id && d.value?.secret_key) {
+                    setTencentVoiceMasked({
+                        id: d.value.secret_id.slice(0, 4) + '****',
+                        key: d.value.secret_key.slice(0, 4) + '****'
+                    });
+                }
+            })
+            .catch(() => { });
+    }, [activeTab]);
+    
+    const saveTencentVoiceKey = async () => {
+        setTencentVoiceSaving(true);
+        const token = localStorage.getItem('token');
+        await fetch('/api/enterprise/system-settings/tencent_voice_key', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+                value: {
+                    secret_id: tencentVoiceForm.secret_id,
+                    secret_key: tencentVoiceForm.secret_key
+                }
+            }),
+        });
+        setTencentVoiceMasked({
+            id: tencentVoiceForm.secret_id.slice(0, 4) + '****',
+            key: tencentVoiceForm.secret_key.slice(0, 4) + '****'
+        });
+        setTencentVoiceForm({ secret_id: '', secret_key: '' });
+        setTencentVoiceSaving(false);
+    };
+    
+    const clearTencentVoiceKey = async () => {
+        const token = localStorage.getItem('token');
+        await fetch('/api/enterprise/system-settings/tencent_voice_key', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ value: {} }),
+        });
+        setTencentVoiceMasked(null);
+        setTencentVoiceForm({ secret_id: '', secret_key: '' });
+    };
+
 
     const { data: currentTenant } = useQuery({
         queryKey: ['tenant', selectedTenantId],
@@ -1954,6 +2007,50 @@ export default function EnterpriseSettings() {
                 {/* ── LLM Model Pool ── */}
                 {activeTab === 'llm' && (
                     <div>
+                        {/* Tencent Voice API Key - Global Setting */}
+                        <div className="card" style={{ marginBottom: '16px', background: 'linear-gradient(135deg, rgba(34,197,94,0.05) 0%, rgba(34,197,94,0.02) 100%)' }}>
+                            <h4 style={{ marginBottom: '12px' }}>🔊 腾讯云语音服务</h4>
+                            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
+                                配置腾讯云密钥后，所有 Agent 都可以使用语音功能。在 Agent 设置中启用语音回复即可。
+                            </p>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                <div className="form-group">
+                                    <label className="form-label">SecretId</label>
+                                    <input
+                                        className="form-input"
+                                        type="password"
+                                        placeholder={tencentVoiceMasked ? `已配置 (${tencentVoiceMasked.id})` : '输入腾讯云 SecretId'}
+                                        value={tencentVoiceForm.secret_id}
+                                        onChange={e => setTencentVoiceForm(f => ({ ...f, secret_id: e.target.value }))}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">SecretKey</label>
+                                    <input
+                                        className="form-input"
+                                        type="password"
+                                        placeholder={tencentVoiceMasked ? `已配置 (${tencentVoiceMasked.key})` : '输入腾讯云 SecretKey'}
+                                        value={tencentVoiceForm.secret_key}
+                                        onChange={e => setTencentVoiceForm(f => ({ ...f, secret_key: e.target.value }))}
+                                    />
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={saveTencentVoiceKey}
+                                    disabled={tencentVoiceSaving || (!tencentVoiceForm.secret_id && !tencentVoiceForm.secret_key)}
+                                >
+                                    {tencentVoiceSaving ? '保存中...' : '保存密钥'}
+                                </button>
+                                {tencentVoiceMasked && (
+                                    <button className="btn btn-secondary" onClick={clearTencentVoiceKey}>
+                                        清除
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
                         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
                             <button className="btn btn-primary" onClick={() => {
                                 setEditingModelId(null);
@@ -2081,7 +2178,7 @@ export default function EnterpriseSettings() {
                                             ...modelForm,
                                             max_output_tokens: modelForm.max_output_tokens ? Number(modelForm.max_output_tokens) : null,
                                             request_timeout: modelForm.request_timeout ? Number(modelForm.request_timeout) : null,
-                                            temperature: modelForm.temperature !== '' ? Number(modelForm.temperature) : null
+                                            temperature: modelForm.temperature !== '' ? Number(modelForm.temperature) : null,
                                         };
                                         addModel.mutate(data);
                                     }} disabled={!modelForm.model || !modelForm.api_key}>
@@ -2198,7 +2295,7 @@ export default function EnterpriseSettings() {
                                                         ...modelForm,
                                                         max_output_tokens: modelForm.max_output_tokens ? Number(modelForm.max_output_tokens) : null,
                                                         request_timeout: modelForm.request_timeout ? Number(modelForm.request_timeout) : null,
-                                                        temperature: modelForm.temperature !== '' ? Number(modelForm.temperature) : null
+                                                        temperature: modelForm.temperature !== '' ? Number(modelForm.temperature) : null,
                                                     };
                                                     updateModel.mutate({ id: editingModelId!, data });
                                                 }} disabled={!modelForm.model}>

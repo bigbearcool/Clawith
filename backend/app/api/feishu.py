@@ -419,7 +419,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             msg_type = "text"
             logger.info(f"[Feishu] Normalized post → text='{_extracted_text[:100]}', images={len(_image_markers)}")
 
-        if msg_type in ("file", "image", "audio"):
+        if msg_type in ("file", "image", "audio", "voice"):
             import asyncio as _asyncio
 
             _asyncio.create_task(_handle_feishu_file(db, agent_id, config, message, sender_open_id, chat_type, chat_id))
@@ -1126,6 +1126,10 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
     message_id = message.get("message_id", "")
     content = json.loads(message.get("content", "{}"))
 
+    # Normalize voice to audio
+    if msg_type == "voice":
+        msg_type = "audio"
+
     # Extract file key and name
     if msg_type == "image":
         file_key = content.get("image_key", "")
@@ -1269,23 +1273,28 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
         session_conv_id = str(_sess.id)
 
         # Store user message — include base64 marker for images so LLM can see them
+        # Note: audio messages are handled separately below with ASR
         if msg_type == "image":
             import base64 as _b64_img
 
             _b64_data = _b64_img.b64encode(file_bytes).decode("ascii")
             _image_marker = f"[image_data:data:image/jpeg;base64,{_b64_data}]"
             user_msg_content = f"[用户发送了图片]\n{_image_marker}"
-        else:
+        elif msg_type != "audio":
             user_msg_content = f"[file:{filename}]"
-        db.add(
-            ChatMessage(
-                agent_id=agent_id,
-                user_id=platform_user_id,
-                role="user",
-                content=user_msg_content if msg_type != "image" else f"[file:{filename}]",
-                conversation_id=session_conv_id,
+        else:
+            user_msg_content = None  # Will be set after ASR
+
+        if user_msg_content:
+            db.add(
+                ChatMessage(
+                    agent_id=agent_id,
+                    user_id=platform_user_id,
+                    role="user",
+                    content=user_msg_content if msg_type != "image" else f"[file:{filename}]",
+                    conversation_id=session_conv_id,
+                )
             )
-        )
         _sess.last_message_at = _dt.now(_tz.utc)
 
         # Load conversation history for LLM context
@@ -1328,29 +1337,71 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                 )
                 return
 
-            # Get LLM model for Tencent credentials
-            model_id = agent_obj.primary_model_id
-            if not model_id:
-                logger.error(f"[Feishu Audio] Agent {agent_id} has no primary model")
+            # Get Tencent Voice credentials from system settings
+            from app.models.system_settings import SystemSetting
+
+            tencent_settings_r = await db.execute(
+                _select(SystemSetting).where(SystemSetting.key == "tencent_voice_key")
+            )
+            tencent_settings = tencent_settings_r.scalar_one_or_none()
+
+            if not tencent_settings or not tencent_settings.value:
+                logger.error(f"[Feishu Audio] Tencent Voice key not configured in system settings")
+                _reply_to = chat_id if chat_type == "group" else sender_open_id
+                _rid_type = "chat_id" if chat_type == "group" else "open_id"
+                await feishu_service.send_message(
+                    config.app_id,
+                    config.app_secret,
+                    _reply_to,
+                    "text",
+                    _json_audio.dumps({"text": "语音功能未配置，请联系管理员配置腾讯云密钥。"}),
+                    receive_id_type=_rid_type,
+                )
                 return
 
-            from app.models.llm import LLMModel
+            tencent_secret_id = tencent_settings.value.get("secret_id")
+            tencent_secret_key = tencent_settings.value.get("secret_key")
 
-            model_r = await db.execute(_select(LLMModel).where(LLMModel.id == model_id))
-            llm_model = model_r.scalar_one_or_none()
-
-            if not llm_model or not getattr(llm_model, "tencent_secret_id", None):
-                logger.error(f"[Feishu Audio] LLM model {model_id} missing Tencent credentials")
+            if not tencent_secret_id or not tencent_secret_key:
+                logger.error(f"[Feishu Audio] Tencent Voice key incomplete")
                 return
 
             # Initialize Tencent Voice Service
             from app.services.tencent_voice import TencentVoiceService
 
-            tencent_voice = TencentVoiceService(llm_model.tencent_secret_id, llm_model.tencent_secret_key)
+            tencent_voice = TencentVoiceService(tencent_secret_id, tencent_secret_key)
+
+            # Convert opus to mp3 using ffmpeg (Tencent ASR doesn't support opus)
+            import subprocess
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".opus", delete=False) as opus_file:
+                opus_file.write(file_bytes)
+                opus_path = opus_file.name
+
+            mp3_path = opus_path.replace(".opus", ".mp3")
+
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", opus_path, "-ar", "16000", "-ac", "1", mp3_path],
+                    check=True,
+                    capture_output=True,
+                )
+                with open(mp3_path, "rb") as f:
+                    mp3_bytes = f.read()
+            except subprocess.CalledProcessError as e:
+                logger.error(f"[Feishu Audio] ffmpeg failed: {e.stderr.decode()}")
+                mp3_bytes = file_bytes  # fallback
+            finally:
+                import os
+
+                os.unlink(opus_path)
+                if os.path.exists(mp3_path):
+                    os.unlink(mp3_path)
 
             # ASR: convert audio to text
             try:
-                transcript = await tencent_voice.asr_one_sentence(file_bytes, format="opus")
+                transcript = await tencent_voice.asr_one_sentence(mp3_bytes, format="mp3")
                 logger.info(f"[Feishu Audio] ASR result: {transcript[:100]}")
             except Exception as e:
                 logger.error(f"[Feishu Audio] ASR failed: {e}")
@@ -1408,16 +1459,27 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
             )
             history = [{"role": m.role, "content": m.content} for m in reversed(_hist_r.scalars().all())]
 
+            # Add voice context - tell agent its text will be converted to voice
+            voice_context = (
+                "[语音对话模式] 用户向你发送了语音消息。"
+                "系统会自动把你的文字回复转换成语音发送给用户。"
+                "所以你应该用自然、口语化的方式回复，就像在打电话一样。"
+                "回复要简洁，不要使用表格、代码块等复杂格式。"
+            )
+            enhanced_role_description = (agent_obj.role_description or "") + "\n\n" + voice_context
+            logger.info(f"[Feishu Audio] Voice mode context added")
+
             # Call LLM
             reply_text = await call_llm(
                 model=model,
                 messages=history,
-                system_prompt=agent_obj.role_description or "",
-                tools=None,
+                agent_name=agent_obj.name or "Agent",
+                role_description=enhanced_role_description,
                 agent_id=agent_id,
                 user_id=platform_user_id,
                 session_id=session_conv_id,
             )
+            logger.info(f"[Feishu Audio] LLM reply: {reply_text[:200]}...")
 
             # Save assistant message
             db.add(
@@ -1434,12 +1496,40 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
         # Generate voice reply
         try:
             audio_bytes = await tencent_voice.tts_synthesis(
-                text=reply_text, voice_type=voice_type, speed=voice_speed, volume=voice_volume, codec="mp3"
+                text=reply_text, voice_type=voice_type, speed=voice_speed, volume=voice_volume, codec="wav"
             )
+
+            # Convert wav to opus using ffmpeg (Feishu requires opus for audio messages)
+            import subprocess
+            import tempfile
+            import os
+
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_file:
+                wav_file.write(audio_bytes)
+                wav_path = wav_file.name
+
+            opus_path = wav_path.replace(".wav", ".opus")
+
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "64k", opus_path],
+                    check=True,
+                    capture_output=True,
+                )
+                with open(opus_path, "rb") as f:
+                    opus_bytes = f.read()
+                logger.info(f"[Feishu Audio] Converted to opus: {len(opus_bytes)} bytes")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"[Feishu Audio] ffmpeg opus conversion failed: {e.stderr.decode()}")
+                opus_bytes = audio_bytes  # fallback
+            finally:
+                os.unlink(wav_path)
+                if os.path.exists(opus_path):
+                    os.unlink(opus_path)
 
             # Upload audio to Feishu
             file_key = await feishu_service.upload_audio(
-                config.app_id, config.app_secret, audio_bytes, file_name=f"reply_{int(time.time())}.mp3"
+                config.app_id, config.app_secret, opus_bytes, file_name=f"reply_{int(time.time())}.opus"
             )
 
             # Send audio message

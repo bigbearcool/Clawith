@@ -1876,6 +1876,10 @@ function AgentDetailInner() {
         max_triggers: 20,
         min_poll_interval_min: 5,
         webhook_rate_limit: 5,
+        voice_enabled: false,
+        voice_type: '101001',
+        voice_speed: 0,
+        voice_volume: 0,
     });
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [settingsSaved, setSettingsSaved] = useState(false);
@@ -1895,6 +1899,10 @@ function AgentDetailInner() {
                 max_triggers: (agent as any).max_triggers ?? 20,
                 min_poll_interval_min: (agent as any).min_poll_interval_min ?? 5,
                 webhook_rate_limit: (agent as any).webhook_rate_limit ?? 5,
+                voice_enabled: (agent as any).voice_enabled ?? false,
+                voice_type: (agent as any).voice_type ?? '101001',
+                voice_speed: (agent as any).voice_speed ?? 0,
+                voice_volume: (agent as any).voice_volume ?? 0,
             });
             settingsInitRef.current = true;
         }
@@ -4993,7 +5001,11 @@ function AgentDetailInner() {
                             String(settingsForm.max_tokens_per_month) !== String(agent?.max_tokens_per_month || '') ||
                             settingsForm.max_triggers !== ((agent as any)?.max_triggers ?? 20) ||
                             settingsForm.min_poll_interval_min !== ((agent as any)?.min_poll_interval_min ?? 5) ||
-                            settingsForm.webhook_rate_limit !== ((agent as any)?.webhook_rate_limit ?? 5)
+                            settingsForm.webhook_rate_limit !== ((agent as any)?.webhook_rate_limit ?? 5) ||
+                            settingsForm.voice_enabled !== ((agent as any)?.voice_enabled ?? false) ||
+                            settingsForm.voice_type !== ((agent as any)?.voice_type ?? '101001') ||
+                            settingsForm.voice_speed !== ((agent as any)?.voice_speed ?? 0) ||
+                            settingsForm.voice_volume !== ((agent as any)?.voice_volume ?? 0)
                         );
 
                         const handleSaveSettings = async () => {
@@ -5010,6 +5022,10 @@ function AgentDetailInner() {
                                     max_triggers: settingsForm.max_triggers,
                                     min_poll_interval_min: settingsForm.min_poll_interval_min,
                                     webhook_rate_limit: settingsForm.webhook_rate_limit,
+                                    voice_enabled: settingsForm.voice_enabled,
+                                    voice_type: settingsForm.voice_type,
+                                    voice_speed: settingsForm.voice_speed,
+                                    voice_volume: settingsForm.voice_volume,
                                 } as any);
                                 queryClient.invalidateQueries({ queryKey: ['agent', id] });
                                 settingsInitRef.current = false;
@@ -5250,6 +5266,118 @@ function AgentDetailInner() {
                                                     </div>
                                                 </div>
                                             </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Voice Settings */}
+                                {(agent as any)?.agent_type !== 'openclaw' && (() => {
+                                    const isChinese = i18n.language?.startsWith('zh');
+                                    const getSpeedLabel = (speed: number): string => {
+                                        if (speed <= -2) return '0.6x';
+                                        if (speed <= -1) return '0.8x';
+                                        if (speed === 0) return isChinese ? '1.0x（正常）' : '1.0x (Normal)';
+                                        if (speed <= 1) return '1.2x';
+                                        if (speed <= 2) return '1.5x';
+                                        return '2.5x';
+                                    };
+                                    const getVolumeLabel = (volume: number): string => {
+                                        if (volume <= -10) return isChinese ? '最小' : 'Min';
+                                        if (volume < 0) return isChinese ? '较小' : 'Low';
+                                        if (volume === 0) return isChinese ? '正常' : 'Normal';
+                                        if (volume < 10) return isChinese ? '较大' : 'High';
+                                        return isChinese ? '最大' : 'Max';
+                                    };
+                                    return (
+                                        <div className="card" style={{ marginBottom: '12px' }}>
+                                            <h4 style={{ marginBottom: '4px' }}>🔊 {isChinese ? '语音设置' : 'Voice Settings'}</h4>
+                                            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
+                                                {isChinese
+                                                    ? '启用后，用户发送语音消息时 Agent 会用语音回复（需在企业设置→模型池配置腾讯云密钥）'
+                                                    : 'When enabled, Agent will reply with voice (configure Tencent Cloud key in Enterprise Settings → Model Pool)'}
+                                            </p>
+                                            <div style={{ marginBottom: '12px' }}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={settingsForm.voice_enabled}
+                                                        onChange={(e) => setSettingsForm(f => ({ ...f, voice_enabled: e.target.checked }))}
+                                                        style={{ width: '16px', height: '16px' }}
+                                                    />
+                                                    <span style={{ fontWeight: 500 }}>{isChinese ? '启用语音回复' : 'Enable Voice Reply'}</span>
+                                                </label>
+                                            </div>
+                                            {settingsForm.voice_enabled && (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                                    <div>
+                                                        <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '6px' }}>
+                                                            {isChinese ? '音色' : 'Voice Type'}
+                                                        </label>
+                                                        <input
+                                                            className="input"
+                                                            type="text"
+                                                            list="voice-options"
+                                                            placeholder={isChinese ? '选择或输入音色 ID' : 'Select or enter voice ID'}
+                                                            value={settingsForm.voice_type}
+                                                            onChange={(e) => setSettingsForm(f => ({ ...f, voice_type: e.target.value }))}
+                                                            style={{ fontSize: '13px' }}
+                                                        />
+                                                        <datalist id="voice-options">
+                                                            <option value="101001">{isChinese ? '智瑜 - 情感女声' : 'Zhiyu - Emotional Female'}</option>
+                                                            <option value="101004">{isChinese ? '智云 - 通用男声' : 'Zhiyun - General Male'}</option>
+                                                            <option value="101026">{isChinese ? '智希 - 通用女声' : 'Zhixi - General Female'}</option>
+                                                            <option value="101030">{isChinese ? '智柯 - 通用男声' : 'Zhike - General Male'}</option>
+                                                            <option value="501004">{isChinese ? '月华 - 聊天女声' : 'Yuehua - Chat Female'}</option>
+                                                            <option value="501005">{isChinese ? '飞镜 - 聊天男声' : 'Feijing - Chat Male'}</option>
+                                                            <option value="502001">{isChinese ? '智小柔 - 聊天女声' : 'Zhixiaorou - Chat Female'}</option>
+                                                            <option value="502006">{isChinese ? '智小悟 - 聊天男声' : 'Zhixiaowu - Chat Male'}</option>
+                                                        </datalist>
+                                                        <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                                            <a href="https://cloud.tencent.com/document/product/1073/92668" target="_blank" rel="noopener noreferrer">
+                                                                {isChinese ? '查看更多音色' : 'More voices'}
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '6px' }}>
+                                                            {isChinese ? `语速: ${getSpeedLabel(settingsForm.voice_speed)}` : `Speed: ${getSpeedLabel(settingsForm.voice_speed)}`}
+                                                        </label>
+                                                        <input
+                                                            type="range"
+                                                            min="-2"
+                                                            max="6"
+                                                            step="0.5"
+                                                            value={settingsForm.voice_speed}
+                                                            onChange={(e) => setSettingsForm(f => ({ ...f, voice_speed: parseFloat(e.target.value) }))}
+                                                            style={{ width: '100%' }}
+                                                        />
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                                            <span>0.6x</span>
+                                                            <span>1.0x</span>
+                                                            <span>2.5x</span>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '6px' }}>
+                                                            {isChinese ? `音量: ${getVolumeLabel(settingsForm.voice_volume)}` : `Volume: ${getVolumeLabel(settingsForm.voice_volume)}`}
+                                                        </label>
+                                                        <input
+                                                            type="range"
+                                                            min="-10"
+                                                            max="10"
+                                                            step="1"
+                                                            value={settingsForm.voice_volume}
+                                                            onChange={(e) => setSettingsForm(f => ({ ...f, voice_volume: parseInt(e.target.value) }))}
+                                                            style={{ width: '100%' }}
+                                                        />
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                                            <span>{isChinese ? '最小' : 'Min'}</span>
+                                                            <span>{isChinese ? '正常' : 'Normal'}</span>
+                                                            <span>{isChinese ? '最大' : 'Max'}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })()}

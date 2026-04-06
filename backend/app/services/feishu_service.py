@@ -565,11 +565,11 @@ class FeishuService:
             app_token = token_resp.json().get("app_access_token", "")
             headers = {"Authorization": f"Bearer {app_token}"}
 
-            # Upload audio file
+            # Upload audio file - use "opus" for audio messages
             upload_resp = await client.post(
                 "https://open.feishu.cn/open-apis/im/v1/files",
-                files={"file": (file_name, audio_bytes, "audio/mpeg")},
-                data={"file_type": "stream", "file_name": file_name},
+                files={"file": (file_name, audio_bytes, "audio/opus")},
+                data={"file_type": "opus", "file_name": file_name},
                 headers=headers,
             )
             upload_data = upload_resp.json()
@@ -621,7 +621,10 @@ class FeishuService:
                 headers=headers,
             )
             result = resp.json()
-            logger.info(f"[Feishu] Audio message sent to {receive_id}")
+            if result.get("code") != 0:
+                logger.error(f"[Feishu] Audio message send failed: {result}")
+            else:
+                logger.info(f"[Feishu] Audio message sent to {receive_id}: {result}")
             return result
 
 

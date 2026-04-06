@@ -22,7 +22,7 @@ class TencentVoiceService:
         self.asr_host = "asr.tencentcloudapi.com"
         self.tts_host = "tts.tencentcloudapi.com"
 
-    def _sign(self, payload: str, host: str, action: str, version: str) -> dict:
+    def _sign(self, payload: str, host: str, action: str, version: str, service: str) -> dict:
         """Generate Tencent Cloud API signature.
 
         Args:
@@ -30,15 +30,14 @@ class TencentVoiceService:
             host: API host
             action: API action name
             version: API version
+            service: Service name (asr, tts)
 
         Returns:
             Headers dict with signature
         """
-        # Timestamp
         timestamp = int(time.time())
         date = datetime.utcfromtimestamp(timestamp).strftime("%Y-%m-%d")
 
-        # Step 1: Generate CanonicalRequest
         http_request_method = "POST"
         canonical_uri = "/"
         canonical_querystring = ""
@@ -55,19 +54,16 @@ class TencentVoiceService:
             f"{hashed_request_payload}"
         )
 
-        # Step 2: Generate StringToSign
         algorithm = "TC3-HMAC-SHA256"
-        credential_scope = f"{date}/tencentcloud/tc3_request"
+        credential_scope = f"{date}/{service}/tc3_request"
         hashed_canonical_request = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
         string_to_sign = f"{algorithm}\n{timestamp}\n{credential_scope}\n{hashed_canonical_request}"
 
-        # Step 3: Calculate Signature
         secret_date = hmac.new(f"TC3{self.secret_key}".encode("utf-8"), date.encode("utf-8"), hashlib.sha256).digest()
-        secret_service = hmac.new(secret_date, "tencentcloud".encode("utf-8"), hashlib.sha256).digest()
+        secret_service = hmac.new(secret_date, service.encode("utf-8"), hashlib.sha256).digest()
         secret_signing = hmac.new(secret_service, "tc3_request".encode("utf-8"), hashlib.sha256).digest()
         signature = hmac.new(secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-        # Step 4: Generate Authorization
         authorization = (
             f"{algorithm} "
             f"Credential={self.secret_id}/{credential_scope}, "
@@ -75,7 +71,6 @@ class TencentVoiceService:
             f"Signature={signature}"
         )
 
-        # Headers
         headers = {
             "Authorization": authorization,
             "Content-Type": ct,
@@ -83,7 +78,6 @@ class TencentVoiceService:
             "X-TC-Action": action,
             "X-TC-Version": version,
             "X-TC-Timestamp": str(timestamp),
-            "X-TC-Region": "",  # Optional
         }
 
         return headers
@@ -113,7 +107,7 @@ class TencentVoiceService:
         payload = json.dumps(payload_dict)
 
         # Sign request
-        headers = self._sign(payload, self.asr_host, "SentenceRecognition", "2019-06-14")
+        headers = self._sign(payload, self.asr_host, "SentenceRecognition", "2019-06-14", "asr")
 
         # Send request
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -172,7 +166,7 @@ class TencentVoiceService:
         payload = json.dumps(payload_dict)
 
         # Sign request
-        headers = self._sign(payload, self.tts_host, "TextToVoice", "2019-08-23")
+        headers = self._sign(payload, self.tts_host, "TextToVoice", "2019-08-23", "tts")
 
         # Send request
         async with httpx.AsyncClient(timeout=60.0) as client:
