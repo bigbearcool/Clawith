@@ -816,6 +816,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 streaming: bool = False,
                 tool_status_lines: list[str] | None = None,
                 agent_name: str | None = None,
+                show_tool_status: bool = True,
             ) -> dict:
                 """Build a Feishu interactive card for streaming replies.
 
@@ -826,39 +827,35 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     tool_status_lines: Override list for image streaming (which maintains its
                         own done-list; pass None to use the default text-streaming state).
                     agent_name: Override the default _agent_name (for image streaming context).
+                    show_tool_status: If False, hide tool status section (used for final card).
                 """
                 _name = agent_name if agent_name is not None else _agent_name
 
                 elements = []
 
-                # Tool status section.
-                # For the primary text-streaming path we use the split running/done dicts;
-                # callers may pass an explicit list (image streaming) as override.
-                if tool_status_lines is not None:
-                    # Caller-supplied override (image path): plain list, no split needed.
-                    if tool_status_lines:
-                        elements.append(
-                            {
-                                "tag": "markdown",
-                                "content": "\n".join(tool_status_lines[-_TOOL_STATUS_KEEP_LINES:]),
-                            }
-                        )
-                        elements.append({"tag": "hr"})
-                else:
-                    # Primary text-streaming path: show done history + any still-running tools.
-                    # _tool_status_running entries are removed when the tool completes,
-                    # so only genuinely in-flight tools appear here.
-                    done_visible = _tool_status_done[-_TOOL_STATUS_KEEP_LINES:]
-                    running_visible = list(_tool_status_running.values())
-                    all_visible = done_visible + running_visible
-                    if all_visible:
-                        elements.append(
-                            {
-                                "tag": "markdown",
-                                "content": "\n".join(all_visible),
-                            }
-                        )
-                        elements.append({"tag": "hr"})
+                # Tool status section - DISABLED (not shown in Feishu)
+                # if show_tool_status:
+                #     if tool_status_lines is not None:
+                #         if tool_status_lines:
+                #             elements.append(
+                #                 {
+                #                     "tag": "markdown",
+                #                     "content": "\n".join(tool_status_lines[-_TOOL_STATUS_KEEP_LINES:]),
+                #                 }
+                #             )
+                #             elements.append({"tag": "hr"})
+                #     else:
+                #         done_visible = _tool_status_done[-_TOOL_STATUS_KEEP_LINES:]
+                #         running_visible = list(_tool_status_running.values())
+                #         all_visible = done_visible + running_visible
+                #         if all_visible:
+                #             elements.append(
+                #                 {
+                #                     "tag": "markdown",
+                #                     "content": "\n".join(all_visible),
+                #                 }
+                #             )
+                #             elements.append({"tag": "hr"})
 
                 # Thinking section: collapsed grey block
                 if thinking_text:
@@ -871,9 +868,10 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     )
                     elements.append({"tag": "hr"})
 
-                # Main content - Feishu card supports up to 30000 chars per element
+                # Main content - never add cursor (user wants clean output)
                 MAX_CARD_CONTENT_LENGTH = 28000
-                body = answer_text + ("▌" if streaming and answer_text else ("..." if streaming else ""))
+                # body = answer_text + ("▌" if streaming and answer_text else ("..." if streaming else ""))
+                body = answer_text  # No cursor, ever
                 if len(body) > MAX_CARD_CONTENT_LENGTH:
                     # Truncate for card, but full content will be sent as plain text later
                     logger.warning(
@@ -981,6 +979,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
 
             # Call LLM with history and streaming callback
             logger.info(f"[Feishu] Starting LLM call for agent {agent_id}")
+            reply_text = ""
             try:
                 reply_text = await _call_agent_llm(
                     db,
@@ -993,6 +992,58 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     on_tool_call=_ws_on_tool_call,
                 )
                 logger.info(f"[Feishu] LLM call returned, reply_text len={len(reply_text) if reply_text else 0}")
+
+                # === CRITICAL: Process and send final reply INSIDE try block ===
+                final_reply_text = reply_text.strip() if reply_text else ""
+                if not final_reply_text and _stream_buffer:
+                    final_reply_text = "".join(_stream_buffer).strip()
+                logger.info(f"[Feishu] Final reply: {len(final_reply_text)} chars")
+
+                _sess.last_task_status = "completed"
+                _sess.last_task_completed_at = _dt.now(_tz.utc)
+                await db.commit()
+
+                if msg_id_for_patch:
+                    try:
+                        await _patch_queue.drain()
+                    except Exception as e:
+                        logger.warning(f"[Feishu] Drain failed: {e}")
+                    final_card = _build_card(
+                        final_reply_text, "".join(_thinking_buffer), streaming=False, show_tool_status=False
+                    )
+                    try:
+                        await feishu_service.patch_message(
+                            config.app_id,
+                            config.app_secret,
+                            msg_id_for_patch,
+                            _json_card.dumps(final_card),
+                            stage="stream_final",
+                        )
+                    except Exception as e:
+                        logger.error(f"[Feishu] Final PATCH failed: {e}")
+                        target = chat_id if chat_type == "group" else sender_open_id
+                        rid_type = "chat_id" if chat_type == "group" else "open_id"
+                        await feishu_service.send_message(
+                            config.app_id,
+                            config.app_secret,
+                            target,
+                            "text",
+                            _json.dumps({"text": final_reply_text}),
+                            receive_id_type=rid_type,
+                        )
+
+                db.add(
+                    ChatMessage(
+                        agent_id=agent_id,
+                        user_id=platform_user_id,
+                        role="assistant",
+                        content=final_reply_text,
+                        conversation_id=session_conv_id,
+                    )
+                )
+                _sess.last_message_at = _dt.now(_tz.utc)
+                await db.commit()
+
             except Exception as e:
                 logger.error(f"[Feishu] LLM call failed: {e}")
                 import traceback
@@ -1011,168 +1062,23 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 _cfs.reset(_cfs_token)
                 _cfso.reset(_cfso_token)
 
-            # Use reply_text directly as the final content
-            # The _stream_buffer may be incomplete for some providers (e.g., MiniMax)
-            # that don't stream content after tool calls.
-            # reply_text contains the full accumulated content from all LLM rounds.
-            final_reply_text = reply_text.strip() if reply_text else ""
-
-            logger.info(
-                f"[Feishu] LLM done, reply_text len={len(final_reply_text)}, stream_buffer len={len(_stream_buffer)}"
-            )
-
-            # Mark task as completed
-            _sess.last_task_status = "completed"
-            _sess.last_task_completed_at = _dt.now(_tz.utc)
-            await db.commit()
-
-            # Send final card update or fallback text
-            # Check if content was truncated (exceeds 28000 chars)
-            _content_truncated = len(final_reply_text) > 28000
-
-            if msg_id_for_patch:
-                try:
-                    await _patch_queue.drain()
-                except Exception as e:
-                    logger.warning(f"[Feishu] Drain patch queue failed before final patch: {e}")
-                final_card = _build_card(
-                    final_reply_text,
-                    "".join(_thinking_buffer),
-                    streaming=False,
-                )
-                try:
-                    await feishu_service.patch_message(
-                        config.app_id,
-                        config.app_secret,
-                        msg_id_for_patch,
-                        _json_card.dumps(final_card),
-                        stage="stream_final",
-                    )
-
-                    # If card was truncated, send full text as separate message
-                    if _content_truncated:
-                        logger.info(f"[Feishu] Sending full text ({len(final_reply_text)} chars) after truncated card")
-                        try:
-                            if chat_type == "group" and chat_id:
-                                await feishu_service.send_message(
-                                    config.app_id,
-                                    config.app_secret,
-                                    chat_id,
-                                    "text",
-                                    _json.dumps({"text": final_reply_text}),
-                                    receive_id_type="chat_id",
-                                    stage="full_text_after_card",
-                                )
-                            else:
-                                await feishu_service.send_message(
-                                    config.app_id,
-                                    config.app_secret,
-                                    sender_open_id,
-                                    "text",
-                                    _json.dumps({"text": final_reply_text}),
-                                    stage="full_text_after_card",
-                                )
-                        except Exception as _full_err:
-                            logger.error(f"[Feishu] Failed to send full text: {_full_err}")
-                except Exception as e:
-                    logger.error(f"[Feishu] Final card patch failed: {e}")
-                    if chat_type == "group" and chat_id:
-                        await feishu_service.send_message(
-                            config.app_id,
-                            config.app_secret,
-                            chat_id,
-                            "text",
-                            _json.dumps({"text": final_reply_text}),
-                            receive_id_type="chat_id",
-                            stage="stream_final_fallback_text",
-                        )
-                    else:
-                        await feishu_service.send_message(
-                            config.app_id,
-                            config.app_secret,
-                            sender_open_id,
-                            "text",
-                            _json.dumps({"text": final_reply_text}),
-                            stage="stream_final_fallback_text",
-                        )
-            else:
-                # Fallback to plain text if card creation failed
-                try:
-                    if chat_type == "group" and chat_id:
-                        await feishu_service.send_message(
-                            config.app_id,
-                            config.app_secret,
-                            chat_id,
-                            "text",
-                            _json.dumps({"text": final_reply_text}),
-                            receive_id_type="chat_id",
-                            stage="stream_no_card_fallback_text",
-                        )
-                    else:
-                        await feishu_service.send_message(
-                            config.app_id,
-                            config.app_secret,
-                            sender_open_id,
-                            "text",
-                            _json.dumps({"text": final_reply_text}),
-                            stage="stream_no_card_fallback_text",
-                        )
-                except Exception as e:
-                    logger.error(f"[Feishu] Failed to send fallback message: {e}")
-
-            # Log activity
-            from app.services.activity_logger import log_activity
-
-            await log_activity(
-                agent_id,
-                "chat_reply",
-                f"回复了飞书消息: {final_reply_text[:80]}",
-                detail={"channel": "feishu", "user_text": user_text[:200], "reply": final_reply_text[:500]},
-            )
-
-            # If task creation detected, create a real Task record
-            if task_match:
-                task_title = task_match.group(1).strip()
-                if task_title:
+                # Send final PATCH one more time to ensure streaming=False and no cursor
+                if msg_id_for_patch and reply_text:
                     try:
-                        from app.models.task import Task as TaskModel
-                        from app.models.agent import Agent as AgentModel
-                        from app.services.task_executor import execute_task
-                        import asyncio as _asyncio
-
-                        # Find the agent's creator to use as task creator
-                        agent_r = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
-                        agent_obj = agent_r.scalar_one_or_none()
-                        creator_id = agent_obj.creator_id if agent_obj else agent_id
-
-                        task_obj = TaskModel(
-                            agent_id=agent_id,
-                            title=task_title,
-                            created_by=creator_id,
-                            status="pending",
-                            priority="medium",
+                        final_text = reply_text.strip() if reply_text else ""
+                        if not final_text and _stream_buffer:
+                            final_text = "".join(_stream_buffer).strip()
+                        final_card = _build_card(final_text, "", streaming=False, show_tool_status=False)
+                        await feishu_service.patch_message(
+                            config.app_id,
+                            config.app_secret,
+                            msg_id_for_patch,
+                            _json_card.dumps(final_card),
+                            stage="final_ensure",
                         )
-                        db.add(task_obj)
-                        await db.commit()
-                        await db.refresh(task_obj)
-                        _asyncio.create_task(execute_task(task_obj.id, agent_id))
-                        final_reply_text += f"\n\n📋 已同步创建任务到任务面板：【{task_title}】"
-                        logger.info(f"[Feishu] Created task: {task_title}")
+                        logger.info(f"[Feishu] Sent final ensure PATCH, len={len(final_text)}")
                     except Exception as e:
-                        logger.error(f"[Feishu] Failed to create task: {e}")
-
-            # Save assistant reply to history (use platform_user_id so messages stay in one session)
-            db.add(
-                ChatMessage(
-                    agent_id=agent_id,
-                    user_id=platform_user_id,
-                    role="assistant",
-                    content=final_reply_text,
-                    conversation_id=session_conv_id,
-                )
-            )
-            _sess.last_message_at = _dt.now(_tz.utc)
-            await db.commit()
+                        logger.warning(f"[Feishu] Final ensure PATCH failed: {e}")
 
     return {"code": 0, "msg": "ok"}
 
@@ -1504,6 +1410,10 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
         # This ensures we have the complete text even when LLM returns empty response.content
         accumulated_text = "".join(_img_stream_buf).strip()
         final_reply_text = reply_text.strip() if reply_text else ""
+        # MiniMax provider may return empty reply_text, use image stream buffer as fallback
+        if not final_reply_text and accumulated_text:
+            final_reply_text = accumulated_text
+            logger.info(f"[Feishu] Image reply_text empty, used accumulated_text: {len(final_reply_text)} chars")
 
         logger.info(f"[Feishu] Image LLM reply (accumulated): {accumulated_text[:100]}")
 
@@ -1518,6 +1428,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                 final_reply_text or "...",
                 streaming=False,
                 agent_name=_agent_name,
+                show_tool_status=False,
             )
             await feishu_service.patch_message(
                 config.app_id,

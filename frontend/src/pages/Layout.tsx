@@ -225,7 +225,7 @@ function VersionDisplay() {
     if (!info.version) return null;
     return (
         <div style={{ textAlign: 'center', fontSize: '10px', color: 'var(--text-quaternary)', marginTop: '8px', letterSpacing: '0.3px' }}>
-            v{info.version}
+            {info.version}
             {info.commit && <span style={{ opacity: 0.6 }}> ({info.commit})</span>}
         </div>
     );
@@ -534,7 +534,7 @@ export default function Layout() {
                 <div className="sidebar-top">
                     <div className="sidebar-logo">
                         <img src={theme === 'dark' ? '/logo-white.png' : '/logo-black.png'} alt="" style={{ width: 22, height: 22 }} />
-                        <span className="sidebar-logo-text">Clawith</span>
+                        <span className="sidebar-logo-text">小圣AI</span>
                         <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
                             padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             marginLeft: 'auto', color: 'var(--text-tertiary)',

@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "add_task_status"
-down_revision = "d9cbd43b62e5"
+down_revision = "add_failed_status"
 branch_labels = None
 depends_on = None
 
