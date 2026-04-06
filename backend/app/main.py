@@ -18,11 +18,13 @@ settings = get_settings()
 async def _start_ss_local() -> None:
     """Start ss-local SOCKS5 proxy for Discord API calls. Tries nodes in priority order."""
     import asyncio, json, os, shutil, tempfile
+
     if not shutil.which("ss-local"):
         logger.info("[Proxy] ss-local not found — Discord proxy disabled")
         return
     # Load proxy nodes from config file (gitignored, mounted as Docker volume)
     import json as _json
+
     cfg_file = os.environ.get("SS_CONFIG_FILE", "/data/ss-nodes.json")
     if os.path.exists(cfg_file):
         # Guard against empty or malformed config file — both produce a clear
@@ -38,20 +40,35 @@ async def _start_ss_local() -> None:
             return
         logger.info(f"[Proxy] Loaded {len(nodes)} node(s) from {cfg_file}")
     elif os.environ.get("SS_SERVER") and os.environ.get("SS_PASSWORD"):
-        nodes = [{"server": os.environ["SS_SERVER"], "port": int(os.environ.get("SS_PORT", "1080")),
-                  "password": os.environ["SS_PASSWORD"], "method": os.environ.get("SS_METHOD", "chacha20-ietf-poly1305"), "label": "env"}]
+        nodes = [
+            {
+                "server": os.environ["SS_SERVER"],
+                "port": int(os.environ.get("SS_PORT", "1080")),
+                "password": os.environ["SS_PASSWORD"],
+                "method": os.environ.get("SS_METHOD", "chacha20-ietf-poly1305"),
+                "label": "env",
+            }
+        ]
     else:
         logger.info(f"[Proxy] {cfg_file} not found and SS_SERVER not set — skipping proxy")
         return
     for node in nodes:
-        cfg = {"server": node["server"], "server_port": node["port"], "local_address": "127.0.0.1",
-               "local_port": 1080, "password": node["password"], "method": node["method"], "timeout": 10}
+        cfg = {
+            "server": node["server"],
+            "server_port": node["port"],
+            "local_address": "127.0.0.1",
+            "local_port": 1080,
+            "password": node["password"],
+            "method": node["method"],
+            "timeout": 10,
+        }
         tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        json.dump(cfg, tf); tf.close()
+        json.dump(cfg, tf)
+        tf.close()
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ss-local", "-c", tf.name,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+                "ss-local", "-c", tf.name, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+            )
             await asyncio.sleep(2)
             if proc.returncode is None:
                 os.environ["DISCORD_PROXY"] = "socks5h://127.0.0.1:1080"
@@ -86,31 +103,33 @@ async def lifespan(app: FastAPI):
     # ── Step 0: Ensure all DB tables exist (idempotent, safe to run on every startup) ──
     try:
         from app.database import Base, engine
+
         # Import all models so Base.metadata is fully populated
-        import app.models.user           # noqa
-        import app.models.agent          # noqa
-        import app.models.task           # noqa
-        import app.models.llm            # noqa
-        import app.models.tool           # noqa
-        import app.models.audit          # noqa
-        import app.models.skill          # noqa
+        import app.models.user  # noqa
+        import app.models.agent  # noqa
+        import app.models.task  # noqa
+        import app.models.llm  # noqa
+        import app.models.tool  # noqa
+        import app.models.audit  # noqa
+        import app.models.skill  # noqa
         import app.models.channel_config  # noqa
-        import app.models.schedule       # noqa
-        import app.models.plaza          # noqa
-        import app.models.activity_log   # noqa
-        import app.models.org            # noqa
+        import app.models.schedule  # noqa
+        import app.models.plaza  # noqa
+        import app.models.activity_log  # noqa
+        import app.models.org  # noqa
         import app.models.system_settings  # noqa
         import app.models.invitation_code  # noqa
-        import app.models.tenant         # noqa
+        import app.models.tenant  # noqa
         import app.models.tenant_setting  # noqa
-        import app.models.participant    # noqa
-        import app.models.chat_session   # noqa
-        import app.models.trigger        # noqa
-        import app.models.notification   # noqa
-        import app.models.gateway_message # noqa
+        import app.models.participant  # noqa
+        import app.models.chat_session  # noqa
+        import app.models.trigger  # noqa
+        import app.models.notification  # noqa
+        import app.models.gateway_message  # noqa
         import app.models.agent_credential  # noqa
 
-        import app.models.identity       # noqa
+        import app.models.identity  # noqa
+
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("[startup] Database tables ready")
@@ -125,6 +144,7 @@ async def lifespan(app: FastAPI):
         from app.models.tenant import Tenant
         from app.database import async_session as _session
         from sqlalchemy import select as _select
+
         async with _session() as _db:
             _existing = await _db.execute(_select(Tenant).where(Tenant.slug == "default"))
             if not _existing.scalar_one_or_none():
@@ -142,6 +162,7 @@ async def lifespan(app: FastAPI):
         from app.models.tenant import Tenant as _T
         from app.database import async_session as _ses
         from sqlalchemy import select as _sel
+
         _data_dir = _Path(_gs().AGENT_DATA_DIR)
         _old_dir = _data_dir / "enterprise_info"
         if _old_dir.exists() and any(_old_dir.iterdir()):
@@ -154,12 +175,15 @@ async def lifespan(app: FastAPI):
                         shutil.copytree(str(_old_dir), str(_new_dir))
                         print(f"[startup] ✅ Migrated enterprise_info → enterprise_info_{_tenant.id}", flush=True)
                     else:
-                        print(f"[startup] ℹ️ enterprise_info_{_tenant.id} already exists, skipping migration", flush=True)
+                        print(
+                            f"[startup] ℹ️ enterprise_info_{_tenant.id} already exists, skipping migration", flush=True
+                        )
     except Exception as e:
         print(f"[startup] ⚠️ enterprise_info migration failed: {e}", flush=True)
 
     try:
         from app.services.tool_seeder import seed_builtin_tools, clean_orphaned_mcp_tools
+
         await seed_builtin_tools()
         await clean_orphaned_mcp_tools()
     except Exception as e:
@@ -167,11 +191,13 @@ async def lifespan(app: FastAPI):
 
     try:
         from app.services.tool_seeder import seed_atlassian_rovo_config, get_atlassian_api_key
+
         await seed_atlassian_rovo_config()
         # Auto-import Atlassian Rovo tools if an API key is already configured
         _rovo_key = await get_atlassian_api_key()
         if _rovo_key:
             from app.services.resource_discovery import seed_atlassian_rovo_tools
+
             await seed_atlassian_rovo_tools(_rovo_key)
     except Exception as e:
         logger.warning(f"[startup] Atlassian tools seed failed: {e}")
@@ -182,14 +208,21 @@ async def lifespan(app: FastAPI):
         logger.warning(f"[startup] Agent templates seed failed: {e}")
 
     try:
-        from app.services.skill_seeder import seed_skills, push_default_skills_to_existing_agents
+        from app.services.skill_seeder import (
+            seed_skills,
+            push_default_skills_to_existing_agents,
+            seed_skills_from_directory,
+        )
+
         await seed_skills()
+        await seed_skills_from_directory(".agents/skills")  # Load XiaoSheng skills
         await push_default_skills_to_existing_agents()
     except Exception as e:
         logger.warning(f"[startup] Skills seed failed: {e}")
 
     try:
         from app.services.agent_seeder import seed_default_agents
+
         await seed_default_agents()
     except Exception as e:
         logger.warning(f"[startup] Default agents seed failed: {e}")
@@ -198,6 +231,7 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("[startup] starting background tasks...")
         from app.services.audit_logger import write_audit_log
+
         await write_audit_log("server_startup", {"pid": os.getpid()})
 
         def _bg_task_error(t):
@@ -209,6 +243,7 @@ async def lifespan(app: FastAPI):
             if exc:
                 logger.error(f"[startup] Background task {t.get_name()} CRASHED: {exc}")
                 import traceback
+
                 traceback.print_exception(type(exc), exc, exc.__traceback__)
 
         for name, coro in [
@@ -225,6 +260,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[startup] Background tasks failed: {e}")
         import traceback
+
         traceback.print_exc()
 
     # Start ss-local SOCKS5 proxy for Discord API calls (non-fatal)
@@ -351,6 +387,7 @@ async def health_check():
 def _load_version_info() -> dict[str, str]:
     """Read version + commit hash once at startup."""
     import os, subprocess
+
     version = "unknown"
     for candidate in ["../frontend/VERSION", "frontend/VERSION", "VERSION"]:
         try:
@@ -367,15 +404,22 @@ def _load_version_info() -> dict[str, str]:
             continue
     if not commit:
         try:
-            commit = subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"],
-                stderr=subprocess.DEVNULL, timeout=3,
-            ).decode().strip()
+            commit = (
+                subprocess.check_output(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                )
+                .decode()
+                .strip()
+            )
         except Exception:
             pass
     return {"version": version, "commit": commit}
 
+
 _version_cache = _load_version_info()
+
 
 @app.get("/api/version", tags=["system"])
 async def get_version():

@@ -25,9 +25,14 @@ ss-nodes.json
 
 # Ignore Antigravity / Claude Code agent configurations
 .agent/
-.agents/
-_agent/
 _agents/
+
+# But track XiaoSheng skills
+# .agents/skills/ and .agents/agents/ should be tracked
+.agents/*
+!.agents/skills/
+!.agents/agents/
+!.agents/.gitkeep
 
 # Internal docs
 docs/

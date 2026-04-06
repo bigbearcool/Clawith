@@ -588,9 +588,7 @@ async def seed_skills():
 
     async with async_session() as db:
         for skill_data in BUILTIN_SKILLS:
-            result = await db.execute(
-                select(Skill).where(Skill.folder_name == skill_data["folder_name"])
-            )
+            result = await db.execute(select(Skill).where(Skill.folder_name == skill_data["folder_name"]))
             existing = result.scalar_one_or_none()
             is_default = skill_data.get("is_default", False)
             if existing:
@@ -602,9 +600,8 @@ async def seed_skills():
                 existing.is_default = is_default
                 # Sync files — add missing ones
                 from sqlalchemy.orm import selectinload
-                res2 = await db.execute(
-                    select(Skill).where(Skill.id == existing.id).options(selectinload(Skill.files))
-                )
+
+                res2 = await db.execute(select(Skill).where(Skill.id == existing.id).options(selectinload(Skill.files)))
                 sk = res2.scalar_one()
                 existing_paths = {f.path: f for f in sk.files}
                 for f in skill_data["files"]:
@@ -638,7 +635,7 @@ async def seed_skills():
 
 async def push_default_skills_to_existing_agents():
     """Deploy all is_default skills into the workspace of every existing agent that is missing them.
-    
+
     Called at startup after seed_skills() so existing agents automatically receive new default skills
     like MCP_INSTALLER without requiring manual re-creation.
     """
@@ -689,3 +686,154 @@ async def push_default_skills_to_existing_agents():
             logger.info(f"[SkillSeeder] Pushed {pushed} new + {updated} updated skill files to existing agents")
         else:
             logger.info("[SkillSeeder] All existing agents already have up-to-date default skills")
+
+
+async def seed_skills_from_directory(skills_dir: str = ".agents/skills"):
+    """Load and seed skills from a local directory.
+
+    This function scans the specified directory for skill packages,
+    reads their SKILL.md files, and imports them into the database.
+
+    Args:
+        skills_dir: Path to the directory containing skill folders
+    """
+    import re
+    from pathlib import Path
+
+    base_path = Path(skills_dir)
+    if not base_path.exists():
+        logger.warning(f"[SkillSeeder] Skills directory not found: {skills_dir}")
+        return
+
+    # Parse YAML frontmatter from SKILL.md
+    def parse_frontmatter(content: str) -> dict:
+        """Extract YAML frontmatter from markdown content."""
+        if not content.startswith("---"):
+            return {}
+
+        # Find the closing ---
+        end_idx = content.find("\n---", 4)
+        if end_idx == -1:
+            return {}
+
+        frontmatter_str = content[4:end_idx]
+        result = {}
+
+        # Simple YAML parsing (handle basic key: value pairs)
+        for line in frontmatter_str.split("\n"):
+            if ":" in line:
+                key, _, value = line.partition(":")
+                key = key.strip()
+                value = value.strip()
+                # Remove quotes if present
+                if value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                elif value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1]
+                # Handle multi-line descriptions
+                if key in result:
+                    if isinstance(result[key], list):
+                        result[key].append(value)
+                    else:
+                        result[key] = [result[key], value]
+                else:
+                    result[key] = value
+
+        return result
+
+    async with async_session() as db:
+        seeded_count = 0
+
+        for skill_folder in sorted(base_path.iterdir()):
+            if not skill_folder.is_dir():
+                continue
+
+            skill_md_path = skill_folder / "SKILL.md"
+            if not skill_md_path.exists():
+                logger.warning(f"[SkillSeeder] No SKILL.md found in {skill_folder.name}")
+                continue
+
+            # Read and parse SKILL.md
+            skill_md_content = skill_md_path.read_text(encoding="utf-8")
+            frontmatter = parse_frontmatter(skill_md_content)
+
+            # Extract skill metadata
+            name = frontmatter.get("name", skill_folder.name)
+            description = frontmatter.get("description", "")
+
+            # Handle multi-line description
+            if isinstance(description, list):
+                description = " ".join(description)
+
+            # Determine category from metadata or folder name
+            category = frontmatter.get("metadata", {}).get("category", "productivity")
+            if isinstance(category, dict):
+                category = category.get("category", "productivity")
+
+            # Collect all files
+            files = []
+            for file_path in skill_folder.rglob("*"):
+                if file_path.is_file() and not file_path.name.startswith("."):
+                    relative_path = str(file_path.relative_to(skill_folder))
+                    try:
+                        file_content = file_path.read_text(encoding="utf-8")
+                        files.append({"path": relative_path, "content": file_content})
+                    except Exception as e:
+                        logger.warning(f"[SkillSeeder] Could not read {file_path}: {e}")
+
+            if not files:
+                logger.warning(f"[SkillSeeder] No files found in {skill_folder.name}")
+                continue
+
+            # Check if skill already exists
+            existing = await db.execute(select(Skill).where(Skill.folder_name == skill_folder.name))
+            existing_skill = existing.scalar_one_or_none()
+
+            if existing_skill:
+                # Update existing skill
+                existing_skill.name = name
+                existing_skill.description = description[:500] if description else ""
+                existing_skill.category = category
+                existing_skill.is_builtin = True
+
+                # Update files
+                from sqlalchemy.orm import selectinload
+
+                res = await db.execute(
+                    select(Skill).where(Skill.id == existing_skill.id).options(selectinload(Skill.files))
+                )
+                sk = res.scalar_one()
+                existing_paths = {f.path: f for f in sk.files}
+
+                for f in files:
+                    if f["path"] in existing_paths:
+                        existing_file = existing_paths[f["path"]]
+                        if existing_file.content != f["content"]:
+                            existing_file.content = f["content"]
+                    else:
+                        db.add(SkillFile(skill_id=existing_skill.id, path=f["path"], content=f["content"]))
+
+                logger.info(f"[SkillSeeder] Updated skill: {name}")
+            else:
+                # Create new skill
+                skill = Skill(
+                    name=name,
+                    description=description[:500] if description else "",
+                    category=category,
+                    icon="📋",
+                    folder_name=skill_folder.name,
+                    is_builtin=True,
+                    is_default=False,
+                )
+                db.add(skill)
+                await db.flush()
+
+                for f in files:
+                    db.add(SkillFile(skill_id=skill.id, path=f["path"], content=f["content"]))
+
+                logger.info(f"[SkillSeeder] Created skill: {name}")
+
+            seeded_count += 1
+
+        await db.commit()
+        logger.info(f"[SkillSeeder] Seeded {seeded_count} skills from {skills_dir}")
