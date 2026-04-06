@@ -250,7 +250,7 @@ class OpenAICompatibleClient(LLMClient):
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True)
+            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True, proxy=None)
         return self._client
 
     def _get_headers(self) -> dict[str, str]:
@@ -567,8 +567,9 @@ class OpenAICompatibleClient(LLMClient):
 
                         if chunk.finish_reason:
                             last_finish_reason = chunk.finish_reason
+                            break
 
-                break  # Success
+                break
 
             except (httpx.TransportError, httpx.ConnectTimeout) as e:
                 # TransportError covers all network-layer issues:
@@ -606,7 +607,11 @@ class OpenAICompatibleClient(LLMClient):
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:
-            await self._client.aclose()
+            try:
+                await asyncio.wait_for(self._client.aclose(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("[LLM] Client close timed out, forcing")
+                self._client = None
 
 
 # ============================================================================
@@ -634,7 +639,7 @@ class OpenAIResponsesClient(LLMClient):
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True)
+            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True, proxy=None)
         return self._client
 
     def _get_headers(self) -> dict[str, str]:
@@ -912,7 +917,11 @@ class OpenAIResponsesClient(LLMClient):
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:
-            await self._client.aclose()
+            try:
+                await asyncio.wait_for(self._client.aclose(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("[LLM] Client close timed out, forcing")
+                self._client = None
 
 
 # ============================================================================
@@ -941,7 +950,7 @@ class GeminiClient(LLMClient):
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True)
+            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True, proxy=None)
         return self._client
 
     async def _get_openai_fallback_client(self) -> OpenAICompatibleClient:
@@ -1340,8 +1349,10 @@ class GeminiClient(LLMClient):
                     if not line.startswith("data:"):
                         continue
                     data_str = line[len("data:") :].strip()
-                    if not data_str or data_str == "[DONE]":
+                    if not data_str:
                         continue
+                    if data_str == "[DONE]":
+                        break
 
                     try:
                         data = json.loads(data_str)
@@ -1360,6 +1371,8 @@ class GeminiClient(LLMClient):
                         continue
                     candidate = candidates[0]
                     final_finish_reason = candidate.get("finishReason") or final_finish_reason
+                    if final_finish_reason:
+                        break
                     content_obj = candidate.get("content", {}) or {}
                     for part in content_obj.get("parts", []) or []:
                         text = part.get("text")
@@ -1406,7 +1419,11 @@ class GeminiClient(LLMClient):
         if self._openai_fallback_client:
             await self._openai_fallback_client.close()
         if self._client and not self._client.is_closed:
-            await self._client.aclose()
+            try:
+                await asyncio.wait_for(self._client.aclose(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("[LLM] Client close timed out, forcing")
+                self._client = None
 
 
 # ============================================================================
@@ -1436,7 +1453,7 @@ class AnthropicClient(LLMClient):
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True)
+            self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True, proxy=None)
         return self._client
 
     def _get_headers(self) -> dict[str, str]:
@@ -1638,6 +1655,7 @@ class AnthropicClient(LLMClient):
 
                     if line.startswith("event:"):
                         current_event = line[len("event:") :].strip()
+                        logger.debug(f"[Anthropic SSE] event: {current_event}")
                         continue
 
                     if not line.startswith("data:"):
@@ -1645,6 +1663,7 @@ class AnthropicClient(LLMClient):
 
                     data_str = line[len("data:") :].strip()
                     if data_str == "[DONE]":
+                        logger.debug("[Anthropic SSE] received [DONE]")
                         break
 
                     try:
@@ -1700,12 +1719,15 @@ class AnthropicClient(LLMClient):
 
                     elif current_event == "message_delta":
                         delta = data.get("delta", {})
+                        logger.debug(
+                            f"[Anthropic SSE] message_delta: stop_reason={delta.get('stop_reason')}, usage={bool(data.get('usage'))}"
+                        )
+                        if data.get("usage"):
+                            final_usage = data["usage"]
                         if delta.get("stop_reason"):
                             last_finish_reason = delta["stop_reason"]
-                        if data.get("usage"):
-                            # message_delta usage is cumulative
-                            final_usage = data["usage"]
-
+                            logger.debug("[Anthropic SSE] breaking on stop_reason")
+                            break
                     elif current_event == "error":
                         error_info = data.get("error", {})
                         raise LLMError(
@@ -1714,6 +1736,10 @@ class AnthropicClient(LLMClient):
 
                     elif current_event == "message_stop":
                         break
+
+            logger.debug(
+                f"[Anthropic SSE] stream loop ended, content={len(full_content)} chars, finish={last_finish_reason}, tools={len(tool_calls_data)}"
+            )
 
         except (httpx.TransportError, httpx.ConnectTimeout) as e:
             # TransportError covers NetworkError (ConnectError, ReadError) and
@@ -1725,6 +1751,8 @@ class AnthropicClient(LLMClient):
             last_finish_reason = "stop"
         elif last_finish_reason == "tool_use":
             last_finish_reason = "tool_calls"
+
+        logger.debug(f"[Anthropic SSE] returning LLMResponse: {len(full_content)} chars, finish={last_finish_reason}")
 
         return LLMResponse(
             content=full_content,
@@ -1739,7 +1767,11 @@ class AnthropicClient(LLMClient):
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:
-            await self._client.aclose()
+            try:
+                await asyncio.wait_for(self._client.aclose(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("[LLM] Client close timed out, forcing")
+                self._client = None
 
 
 # ============================================================================

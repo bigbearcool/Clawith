@@ -79,7 +79,19 @@ class AgentRelationship(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    member: Mapped["OrgMember"] = relationship()
+
+member: Mapped["OrgMember"] = relationship()
+
+
+class AgentGroup(Base):
+    """Group relationship for an agent - allows broadcasting to chat groups."""
+
+    __tablename__ = "agent_groups"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
 
 
 class AgentGroup(Base):
