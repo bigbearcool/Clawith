@@ -94,72 +94,81 @@ class BaseAuthProvider(ABC):
     async def find_or_create_user(
         self, db: AsyncSession, user_info: ExternalUserInfo, tenant_id: str | None = None
     ) -> tuple[User, bool]:
-        """Find existing user or create new one via Identity/OrgMember.
+        """Find existing user or create new one via OrgMember.
 
         Args:
             db: Database session
             user_info: User info from provider
             tenant_id: Optional tenant ID for association
+
+        Returns:
+            Tuple of (user, is_new) where is_new indicates if user was created
         """
         from app.services.sso_service import sso_service
-        from sqlalchemy.orm import selectinload
 
         # Ensure provider exists
         await self._ensure_provider(db, tenant_id)
 
         # 1. Try lookup via sso_service (which now uses OrgMember)
+        # Prefer unionid if available, fallback to provider_user_id
         provider_user_id = user_info.provider_union_id or user_info.provider_user_id
-        user = await sso_service.resolve_user_identity(
-            db, provider_user_id, self.provider_type, tenant_id=tenant_id
-        )
-        
-        # Feishu: fallback to open_id if union_id lookup misses
-        if (
-            not user
-            and self.provider_type == "feishu"
-            and user_info.provider_union_id
-            and user_info.provider_user_id
-        ):
+        user = await sso_service.resolve_user_identity(db, provider_user_id, self.provider_type, tenant_id=tenant_id)
+        # Feishu: if union_id lookup misses, fall back to open_id (org sync app may not return union_id)
+        if not user and self.provider_type == "feishu" and user_info.provider_union_id and user_info.provider_user_id:
             user = await sso_service.resolve_user_identity(
                 db, user_info.provider_user_id, self.provider_type, tenant_id=tenant_id
             )
 
         is_new = False
         if not user:
-            # 2. Try matching by email/mobile (which now checks Identity too)
-            if user_info.email:
-                user = await sso_service.match_user_by_email(db, user_info.email, tenant_id)
-            if not user and user_info.mobile:
-                user = await sso_service.match_user_by_mobile(db, user_info.mobile, tenant_id)
-            
+            # 2. Fallback to legacy columns on User table
+            user = await self._find_user_by_legacy_fields(db, user_info)
+
+        # 3. Also try matching by email if available
+        if not user and user_info.email:
+            user = await sso_service.match_user_by_email(db, user_info.email, tenant_id)
             if user:
-                # If we found a user via email/mobile matching, it might be in a different tenant
-                if tenant_id and str(user.tenant_id) != tenant_id:
-                    # Identity exists but no user in this tenant
-                    user = None 
+                # Link identity (OrgMember) to existing user
+                await sso_service.link_identity(
+                    db,
+                    str(user.id),
+                    self.provider_type,
+                    provider_user_id,
+                    user_info.raw_data,
+                    tenant_id=tenant_id,
+                )
+
+        # 4. Also try matching by mobile if available (critical to prevent duplicate users)
+        if not user and user_info.mobile:
+            user = await sso_service.match_user_by_mobile(db, user_info.mobile, tenant_id)
+            if user:
+                # Link identity (OrgMember) to existing user
+                await sso_service.link_identity(
+                    db,
+                    str(user.id),
+                    self.provider_type,
+                    provider_user_id,
+                    user_info.raw_data,
+                    tenant_id=tenant_id,
+                )
 
         if user:
-            # Update user info and ensure identity is loaded
-            if not user.identity_id:
-                 from app.services.registration_service import registration_service
-                 identity = await registration_service.find_or_create_identity(db, email=user_info.email, phone=user_info.mobile)
-                 user.identity_id = identity.id
-            
+            # Update user info
             await self._update_existing_user(db, user, user_info)
         else:
-            # 3. Create new user (and Identity if needed)
+            # Create new user
             user = await self._create_new_user(db, user_info, tenant_id)
             is_new = True
-            
-        # Ensure OrgMember linkage
-        await sso_service.link_identity(
-            db,
-            str(user.id),
-            self.provider_type,
-            provider_user_id,
-            user_info.raw_data,
-            tenant_id=tenant_id,
-        )
+
+            # Link identity (OrgMember) to the new user
+            await sso_service.link_identity(
+                db,
+                str(user.id),
+                self.provider_type,
+                provider_user_id,
+                user_info.raw_data,
+                tenant_id=tenant_id,
+            )
 
         return user, is_new
 
@@ -171,7 +180,7 @@ class BaseAuthProvider(ABC):
         query = select(IdentityProvider).where(IdentityProvider.provider_type == self.provider_type)
         if tenant_id:
             query = query.where(IdentityProvider.tenant_id == tenant_id)
-            
+
         result = await db.execute(query)
         provider = result.scalar_one_or_none()
 
@@ -193,9 +202,7 @@ class BaseAuthProvider(ABC):
         """Find user by legacy provider-specific fields (if any)."""
         return None  # Override in subclasses for backward compatibility
 
-    async def _update_existing_user(
-        self, db: AsyncSession, user: User, user_info: ExternalUserInfo
-    ):
+    async def _update_existing_user(self, db: AsyncSession, user: User, user_info: ExternalUserInfo):
         """Update existing user with new info from provider."""
         if user_info.name and not user.display_name:
             user.display_name = user_info.name
@@ -209,58 +216,48 @@ class BaseAuthProvider(ABC):
         # Update legacy fields if applicable
         await self._update_legacy_user_fields(user, user_info)
 
-    async def _create_new_user(
-        self, db: AsyncSession, user_info: ExternalUserInfo, tenant_id: str | None
-    ) -> User:
+    async def _create_new_user(self, db: AsyncSession, user_info: ExternalUserInfo, tenant_id: str | None) -> User:
         """Create new user from external identity."""
-        from app.services.registration_service import registration_service
-        import uuid
-        
-        # 1. Prepare user fields and resolve global identity
-        effective_id = user_info.provider_user_id or user_info.provider_union_id or "unknown"
-        
-        identity = await registration_service.find_or_create_identity(
-            db,
-            email=user_info.email,
-            phone=user_info.mobile,
-            username=user_info.email.split("@")[0] if user_info.email else None,
-            password=effective_id,
+        username = (
+            user_info.email.split("@")[0]
+            if user_info.email
+            else f"{self.provider_type}_{user_info.provider_user_id[:8]}"
         )
 
-        # 2. Prepare Tenant user fields
-        username = user_info.email.split("@")[0] if user_info.email else f"{self.provider_type}_{effective_id[:8]}"
-
-        # Ensure unique username within tenant
-        query = (
-            select(User)
-            .join(User.identity)
-            .where(Identity.username == username)
-        )
-        if tenant_id:
-            query = query.where(User.tenant_id == tenant_id)
-        existing = await db.execute(query)
+        # Ensure unique username
+        existing = await db.execute(select(Identity).where(Identity.username == username))
         if existing.scalar_one_or_none():
-            username = f"{username}_{uuid.uuid4().hex[:6]}"
+            username = f"{username}_{user_info.provider_user_id[:6]}"
 
-        # 3. Create TenantUser record
+        email = user_info.email or f"{username}@{self.provider_type}.local"
+
+        # Create Identity first
+        identity = Identity(
+            email=email,
+            username=username,
+            password_hash=hash_password(user_info.provider_user_id),
+            phone=user_info.mobile,
+            email_verified=bool(user_info.email),
+            is_active=True,
+        )
+        db.add(identity)
+        await db.flush()
+
+        # Create User linked to Identity
         user = User(
             identity_id=identity.id,
             display_name=user_info.name or username,
             avatar_url=user_info.avatar_url,
             registration_source=self.provider_type,
             tenant_id=tenant_id,
-            is_active=True,
         )
 
-
-        # Set legacy fields if needed
+        # Set legacy fields
         await self._set_legacy_user_fields(user, user_info)
 
         db.add(user)
         await db.flush()
-        
-        # Preload identity
-        user.identity = identity
+
         return user
 
     async def _update_legacy_user_fields(self, user: User, user_info: ExternalUserInfo):
@@ -320,9 +317,7 @@ class FeishuAuthProvider(BaseAuthProvider):
 
     async def get_user_info(self, access_token: str) -> ExternalUserInfo:
         async with httpx.AsyncClient() as client:
-            info_resp = await client.get(
-                self.FEISHU_USER_INFO_URL, headers={"Authorization": f"Bearer {access_token}"}
-            )
+            info_resp = await client.get(self.FEISHU_USER_INFO_URL, headers={"Authorization": f"Bearer {access_token}"})
             info_data = info_resp.json().get("data", {})
             logger.info(f"Feishu user info: {info_data}")
 
@@ -367,6 +362,7 @@ class DingTalkAuthProvider(BaseAuthProvider):
         app_id = self.app_key or ""
         base_url = "https://login.dingtalk.com/oauth2/auth"
         from urllib.parse import quote
+
         # contact.user.email and contact.user.mobile require specific permissions in DingTalk console
         scope = "openid corpid fieldEmail contact.user.mobile"
         params = (
@@ -463,56 +459,18 @@ class WeComAuthProvider(BaseAuthProvider):
                 params={"access_token": access_token, "code": code},
             )
             user_data = user_resp.json()
-            userid = user_data.get("UserId")
-            if not userid:
-                logger.error(f"WeCom user auth info missing UserId: {user_data}")
-                return {}
-
-            # Fetch detailed user info
-            detail_res = await client.get(
-                "https://qyapi.weixin.qq.com/cgi-bin/user/get",
-                params={"access_token": access_token, "userid": userid},
-            )
-            detail_data = detail_res.json()
-            if detail_data.get("errcode") == 0:
-                logger.info(f"WeCom user detail fetched for userid {userid}")
-            else:
-                logger.warning(f"WeCom user detail fetch failed: {detail_data}")
-
-            # Pack all info into the access_token string to satisfy BaseAuthProvider interface
-            import json
-            packed_token = json.dumps({
-                "access_token": access_token,
-                "userid": userid,
-                "detail": detail_data
-            })
-            
-            return {"access_token": packed_token}
+            logger.info(f"WeCom user auth info: {user_data}")
+            return user_data
 
     async def get_user_info(self, access_token: str) -> ExternalUserInfo:
-        import json
-        try:
-            data = json.loads(access_token)
-            userid = data.get("userid", "")
-            detail = data.get("detail", {})
-            
-            return ExternalUserInfo(
-                provider_type=self.provider_type,
-                provider_user_id=userid,
-                name=detail.get("name") or f"WeCom {userid}",
-                email=detail.get("email") or detail.get("biz_mail") or "",
-                avatar_url=detail.get("avatar") or "",
-                mobile=detail.get("mobile") or "",
-                raw_data=detail,
-            )
-        except Exception as e:
-            logger.error(f"WeCom get_user_info error: {e}")
-            return ExternalUserInfo(
-                provider_type=self.provider_type,
-                provider_user_id="",
-                name="",
-                raw_data={"error": str(e)},
-            )
+        # WeCom returns user info in the token exchange response
+        logger.info("WeCom get_user_info called (user info usually handled in exchange_code)")
+        return ExternalUserInfo(
+            provider_type=self.provider_type,
+            provider_user_id="",
+            name="",
+            raw_data={"wecom": "user_info_in_token_response"},
+        )
 
 
 class MicrosoftTeamsAuthProvider(BaseAuthProvider):

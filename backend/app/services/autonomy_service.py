@@ -24,9 +24,7 @@ from app.services.feishu_service import feishu_service
 class AutonomyService:
     """Enforce autonomy boundaries for agent operations."""
 
-    async def check_and_enforce(
-        self, db: AsyncSession, agent: Agent, action_type: str, details: dict
-    ) -> dict:
+    async def check_and_enforce(self, db: AsyncSession, agent: Agent, action_type: str, details: dict) -> dict:
         """Check if an action is allowed under the agent's autonomy policy.
 
         Returns:
@@ -93,9 +91,7 @@ class AutonomyService:
         self, db: AsyncSession, approval_id: uuid.UUID, user: User, action: str
     ) -> ApprovalRequest:
         """Approve or reject a pending approval request."""
-        result = await db.execute(
-            select(ApprovalRequest).where(ApprovalRequest.id == approval_id)
-        )
+        result = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == approval_id))
         approval = result.scalar_one_or_none()
         if not approval:
             raise ValueError("Approval not found")
@@ -114,12 +110,14 @@ class AutonomyService:
         approval.resolved_by = user.id
 
         # Log
-        db.add(AuditLog(
-            user_id=user.id,
-            agent_id=approval.agent_id,
-            action=f"approval_{approval.status}",
-            details={"approval_id": str(approval.id), "action_type": approval.action_type},
-        ))
+        db.add(
+            AuditLog(
+                user_id=user.id,
+                agent_id=approval.agent_id,
+                action=f"approval_{approval.status}",
+                details={"approval_id": str(approval.id), "action_type": approval.action_type},
+            )
+        )
 
         # Post-processing: execute the approved action
         execution_result = None
@@ -132,6 +130,7 @@ class AutonomyService:
         # Web notification to agent creator about the result
         if agent:
             from app.services.notification_service import send_notification
+
             status_label = "approved" if approval.status == "approved" else "rejected"
             body_text = json.dumps(approval.details, ensure_ascii=False)[:200]
             if execution_result:
@@ -167,9 +166,7 @@ class AutonomyService:
         await db.flush()
         return approval
 
-    async def _execute_approved_action(
-        self, agent_id: uuid.UUID, action_type: str, details: dict
-    ) -> str | None:
+    async def _execute_approved_action(self, agent_id: uuid.UUID, action_type: str, details: dict) -> str | None:
         """Execute the tool action that was approved.
 
         Reads the tool name and arguments from the approval details,
@@ -183,6 +180,7 @@ class AutonomyService:
         try:
             # Parse args — stored as str(dict) so we need ast.literal_eval
             import ast
+
             if isinstance(args_raw, str):
                 try:
                     arguments = ast.literal_eval(args_raw)
@@ -196,17 +194,18 @@ class AutonomyService:
 
             # Import and call the tool's direct executor (no autonomy re-check)
             from app.services.agent_tools import _execute_tool_direct
+
             result = await _execute_tool_direct(tool_name, arguments, agent_id)
             return result
         except Exception as e:
             logger.error(f"Failed to execute approved action {tool_name}: {e}")
             return f"Execution failed: {e}"
 
-    async def _notify_creator(self, db: AsyncSession, agent: Agent,
-                               action_type: str, details: dict) -> None:
+    async def _notify_creator(self, db: AsyncSession, agent: Agent, action_type: str, details: dict) -> None:
         """Send L2 notification to agent creator via Feishu + web."""
         # Web notification (always)
         from app.services.notification_service import send_notification
+
         await send_notification(
             db,
             user_id=agent.creator_id,
@@ -217,15 +216,11 @@ class AutonomyService:
         )
 
         # Try Feishu notification if channel is configured
-        channel_result = await db.execute(
-            select(ChannelConfig).where(ChannelConfig.agent_id == agent.id)
-        )
+        channel_result = await db.execute(select(ChannelConfig).where(ChannelConfig.agent_id == agent.id))
         channel = channel_result.scalars().first()
 
         if channel and channel.app_id and channel.app_secret:
-            creator_result = await db.execute(
-                select(User).where(User.id == agent.creator_id)
-            )
+            creator_result = await db.execute(select(User).where(User.id == agent.creator_id))
             creator = creator_result.scalar_one_or_none()
             if creator:
                 from app.models.identity import IdentityProvider
@@ -246,21 +241,31 @@ class AutonomyService:
                         )
                     )
                     member = member_r.scalar_one_or_none()
-                    if member and (member.external_id or member.open_id):
-                        receive_id = member.external_id or member.open_id
-                        id_type = "user_id" if member.external_id else "open_id"
-                        await feishu_service.send_message(
-                            channel.app_id, channel.app_secret,
-                            receive_id, "text",
-                            json.dumps({"text": f"[{agent.name}] executed: {action_type}"}),
-                            receive_id_type=id_type,
-                        )
+                    if member and (member.open_id or member.external_id):
+                        # Prefer open_id (more reliable), fallback to external_id
+                        receive_id = member.open_id or member.external_id
+                        # Determine id_type based on which field we're using
+                        id_type = "open_id" if member.open_id else "user_id"
+                        try:
+                            await feishu_service.send_message(
+                                channel.app_id,
+                                channel.app_secret,
+                                receive_id,
+                                "text",
+                                json.dumps({"text": f"[{agent.name}] executed: {action_type}"}),
+                                receive_id_type=id_type,
+                                stage="autonomy_l2_notification",
+                            )
+                        except Exception as e:
+                            # Isolate error: log but don't fail the main task
+                            logger.error(f"[Autonomy] Feishu notification failed (L2, agent={agent.id}): {e}")
+                            # Don't raise - notification failure shouldn't break the tool execution
 
-    async def _request_approval(self, db: AsyncSession, agent: Agent,
-                                 approval: ApprovalRequest) -> None:
+    async def _request_approval(self, db: AsyncSession, agent: Agent, approval: ApprovalRequest) -> None:
         """Send L3 approval request to creator via Feishu card + web notification."""
         # Web notification (always)
         from app.services.notification_service import send_notification
+
         await send_notification(
             db,
             user_id=agent.creator_id,
@@ -272,15 +277,11 @@ class AutonomyService:
         )
 
         # Try Feishu notification
-        channel_result = await db.execute(
-            select(ChannelConfig).where(ChannelConfig.agent_id == agent.id)
-        )
+        channel_result = await db.execute(select(ChannelConfig).where(ChannelConfig.agent_id == agent.id))
         channel = channel_result.scalars().first()
 
         if channel and channel.app_id and channel.app_secret:
-            creator_result = await db.execute(
-                select(User).where(User.id == agent.creator_id)
-            )
+            creator_result = await db.execute(select(User).where(User.id == agent.creator_id))
             creator = creator_result.scalar_one_or_none()
             if creator:
                 from app.models.identity import IdentityProvider
@@ -301,15 +302,25 @@ class AutonomyService:
                         )
                     )
                     member = member_r.scalar_one_or_none()
-                    if member and (member.external_id or member.open_id):
-                        receive_id = member.external_id or member.open_id
-                        await feishu_service.send_approval_card(
-                            channel.app_id, channel.app_secret,
-                            receive_id,
-                            agent.name, approval.action_type,
-                            json.dumps(approval.details, ensure_ascii=False),
-                            str(approval.id),
-                        )
+                    if member and (member.open_id or member.external_id):
+                        # Prefer open_id (more reliable), fallback to external_id
+                        receive_id = member.open_id or member.external_id
+                        id_type = "open_id" if member.open_id else "user_id"
+                        try:
+                            await feishu_service.send_approval_card(
+                                channel.app_id,
+                                channel.app_secret,
+                                receive_id,
+                                agent.name,
+                                approval.action_type,
+                                json.dumps(approval.details, ensure_ascii=False),
+                                str(approval.id),
+                                receive_id_type=id_type,
+                            )
+                        except Exception as e:
+                            # Isolate error: log but don't fail the approval request
+                            logger.error(f"[Autonomy] Feishu approval card failed (L3, agent={agent.id}): {e}")
+                            # Don't raise - notification failure shouldn't break the approval process
 
 
 autonomy_service = AutonomyService()

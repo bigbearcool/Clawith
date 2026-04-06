@@ -10,8 +10,12 @@ import LinearCopyButton from '../components/LinearCopyButton';
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     const token = localStorage.getItem('token');
     const res = await fetch(`/api${url}`, {
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         ...options,
+        headers: { 
+            'Content-Type': 'application/json', 
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...options?.headers,
+        },
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -46,7 +50,8 @@ export default function AdminCompanies() {
     const { t } = useTranslation();
     const user = useAuthStore((s) => s.user);
     const [activeTab, setActiveTab] = useState<'dashboard' | 'platform' | 'companies'>('dashboard');
-
+    const [refreshKey, setRefreshKey] = useState(0);
+    
     // Guard: only platform_admin
     if (user?.role !== 'platform_admin') {
         return (
@@ -87,8 +92,8 @@ export default function AdminCompanies() {
 
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 {activeTab === 'dashboard' && <PlatformDashboard />}
-                {activeTab === 'platform' && <PlatformTab />}
-                {activeTab === 'companies' && <CompaniesTab />}
+                {activeTab === 'platform' && <PlatformTab onPlatformUrlSaved={() => { setRefreshKey(k => k + 1); setActiveTab('companies'); }} />}
+                {activeTab === 'companies' && <CompaniesTab refreshKey={refreshKey} />}
             </div>
         </div>
     );
@@ -96,7 +101,7 @@ export default function AdminCompanies() {
 
 
 // ─── Platform Tab ──────────────────────────────────
-function PlatformTab() {
+function PlatformTab({ onPlatformUrlSaved }: { onPlatformUrlSaved?: () => void }) {
     const { t } = useTranslation();
 
     // Platform settings toggles
@@ -108,6 +113,11 @@ function PlatformTab() {
     const [nbText, setNbText] = useState('');
     const [nbSaving, setNbSaving] = useState(false);
     const [nbSaved, setNbSaved] = useState(false);
+
+    // Platform public URL
+    const [platformUrl, setPlatformUrl] = useState('');
+    const [platformUrlSaving, setPlatformUrlSaving] = useState(false);
+    const [platformUrlSaved, setPlatformUrlSaved] = useState(false);
 
 
     // System email configuration
@@ -161,8 +171,17 @@ function PlatformTab() {
                 setNbEnabled(!!d.value.enabled);
                 setNbText(d.value.text || '');
             }
-        }).catch(() => { });
-            
+}).catch(() => { });
+        
+        // Load Platform URL
+        fetchJson<any>('/enterprise/system-settings/platform')
+            .then(d => {
+                if (d?.value?.public_base_url) {
+                    setPlatformUrl(d.value.public_base_url);
+                }
+            })
+            .catch(() => { });
+
         // Load System Email
         fetchJson<any>('/enterprise/system-settings/system_email_platform')
             .then(d => {
@@ -216,6 +235,27 @@ function PlatformTab() {
             setTimeout(() => setNbSaved(false), 2000);
         } catch { }
         setNbSaving(false);
+    };
+
+    const savePlatformUrl = async () => {
+        setPlatformUrlSaving(true);
+        try {
+            await fetchJson('/enterprise/system-settings/platform', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: { public_base_url: platformUrl.trim() } }),
+            });
+            setPlatformUrlSaved(true);
+            setTimeout(() => setPlatformUrlSaved(false), 2000);
+            showToast(t('admin.platformUrl.saved', 'Platform URL saved. SSO domains regenerated.'), 'success');
+            // Trigger refresh and switch to companies tab
+            if (onPlatformUrlSaved) {
+                setTimeout(() => onPlatformUrlSaved(), 1000);
+            }
+        } catch (e: any) {
+            showToast(e.message || 'Failed to save', 'error');
+        }
+        setPlatformUrlSaving(false);
     };
 
 
@@ -378,6 +418,42 @@ function PlatformTab() {
                 </div>
             </div>
 
+            {/* Platform Public URL */}
+            <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text-secondary)' }}>
+                    {t('admin.platformUrl.title', 'Platform Public URL')}
+                </div>
+                <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
+                    {t('admin.platformUrl.description', 'The public base URL of this platform. Used for OAuth callbacks, email links, and SSO domain generation.')}
+                </p>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1 }}>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>
+                            {t('admin.platformUrl.label', 'Public URL')}
+                        </label>
+                        <input
+                            className="form-input"
+                            type="url"
+                            placeholder="https://your-domain.com"
+                            value={platformUrl}
+                            onChange={e => setPlatformUrl(e.target.value)}
+                            style={{ fontSize: '13px' }}
+                        />
+                    </div>
+                    <button 
+                        className="btn btn-primary" 
+                        onClick={savePlatformUrl} 
+                        disabled={platformUrlSaving}
+                        style={{ height: '36px' }}
+                    >
+                        {platformUrlSaving ? t('common.loading') : t('common.save', 'Save')}
+                    </button>
+                    {platformUrlSaved && <span style={{ color: 'var(--success)', fontSize: '12px' }}>{t('enterprise.config.saved', 'Saved')}</span>}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px' }}>
+                    {t('admin.platformUrl.note', 'Priority: This setting (highest) > Environment variable PUBLIC_BASE_URL > Auto-detect from request. SSO domains will be generated as: {slug}.{domain}') }
+                </div>
+            </div>
 
 
             {/* System Email Configuration */}
@@ -637,7 +713,7 @@ function PlatformTab() {
 
 
 // ─── Companies Tab ─────────────────────────────────
-function CompaniesTab() {
+function CompaniesTab({ refreshKey }: { refreshKey?: number }) {
     const { t } = useTranslation();
     const [companies, setCompanies] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -668,9 +744,13 @@ function CompaniesTab() {
     // Create company
     const [showCreate, setShowCreate] = useState(false);
     const [newName, setNewName] = useState('');
+    const [newSlug, setNewSlug] = useState('');
     const [creating, setCreating] = useState(false);
     const [createdCode, setCreatedCode] = useState('');
     const [createdCompanyName, setCreatedCompanyName] = useState('');
+
+    // Edit company
+    const [editingCompany, setEditingCompany] = useState<any | null>(null);
 
     // Toast
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -692,7 +772,7 @@ function CompaniesTab() {
 
     useEffect(() => {
         loadCompanies();
-    }, []);
+    }, [refreshKey]);
 
     // Sorting logic
     const handleSort = (key: SortKey) => {
@@ -734,10 +814,11 @@ function CompaniesTab() {
         if (!newName.trim()) return;
         setCreating(true);
         try {
-            const result = await adminApi.createCompany({ name: newName.trim() });
+            const result = await adminApi.createCompany({ name: newName.trim(), slug: newSlug.trim() || undefined });
             setCreatedCompanyName(newName.trim());
             setCreatedCode(result.admin_invitation_code || '');
             setNewName('');
+            setNewSlug('');
             setShowCreate(false);
             loadCompanies();
         } catch (e: any) {
@@ -888,17 +969,26 @@ function CompaniesTab() {
                     <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px' }}>
                         {t('admin.createCompany', 'Create Company')}
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                        <input className="form-input" value={newName} onChange={e => setNewName(e.target.value)}
-                            placeholder={t('admin.companyNamePlaceholder', 'Company name')}
-                            onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                            style={{ flex: 1 }} autoFocus />
-                        <button className="btn btn-primary" onClick={handleCreate} disabled={creating || !newName.trim()}>
-                            {creating ? '...' : t('common.create', 'Create')}
-                        </button>
-                        <button className="btn btn-secondary" onClick={() => setShowCreate(false)}>
-                            {t('common.cancel', 'Cancel')}
-                        </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <input className="form-input" value={newName} onChange={e => setNewName(e.target.value)}
+                                placeholder={t('admin.companyNamePlaceholder', 'Company name')}
+                                onKeyDown={e => e.key === 'Enter' && handleCreate()}
+                                style={{ flex: 1 }} autoFocus />
+                            <input className="form-input" value={newSlug} onChange={e => setNewSlug(e.target.value)}
+                                placeholder={t('admin.slugPlaceholder', 'Custom slug (optional)')}
+                                onKeyDown={e => e.key === 'Enter' && handleCreate()}
+                                style={{ flex: 1 }} />
+                            <button className="btn btn-primary" onClick={handleCreate} disabled={creating || !newName.trim()}>
+                                {creating ? '...' : t('common.create', 'Create')}
+                            </button>
+                            <button className="btn btn-secondary" onClick={() => { setShowCreate(false); setNewName(''); setNewSlug(''); }}>
+                                {t('common.cancel', 'Cancel')}
+                            </button>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                            {t('admin.slugHelp', 'Slug is used for SSO domain: slug.bigbear.cool. Leave empty to auto-generate from company name.')}
+                        </div>
                     </div>
                 </div>
             )}
@@ -1027,6 +1117,16 @@ function CompaniesTab() {
                                 className="btn btn-ghost"
                                 style={{
                                     padding: '2px 8px', fontSize: '11px', height: '24px',
+                                    color: 'var(--accent-primary)',
+                                }}
+                                onClick={() => setEditingCompany(c)}
+                            >
+                                {t('admin.edit', 'Edit')}
+                            </button>
+                            <button
+                                className="btn btn-ghost"
+                                style={{
+                                    padding: '2px 8px', fontSize: '11px', height: '24px',
                                     color: c.slug === 'default' ? 'var(--text-tertiary)' : c.is_active ? 'var(--error)' : 'var(--success)',
                                     cursor: c.slug === 'default' ? 'not-allowed' : 'pointer',
                                     opacity: c.slug === 'default' ? 0.5 : 1,
@@ -1078,6 +1178,15 @@ function CompaniesTab() {
                     </div>
                 )}
             </div>
+
+            {/* Edit Company Modal */}
+            {editingCompany && (
+                <EditCompanyModal
+                    company={editingCompany}
+                    onClose={() => setEditingCompany(null)}
+                    onUpdated={loadCompanies}
+                />
+            )}
         </div>
     );
 }
@@ -1085,21 +1194,33 @@ function CompaniesTab() {
 // ─── Edit Company Modal ───────────────────────────────
 function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClose: () => void, onUpdated: () => void }) {
     const { t } = useTranslation();
+    const [name, setName] = useState(company.name || '');
+    const [slug, setSlug] = useState(company.slug || '');
     const [ssoEnabled, setSsoEnabled] = useState(!!company.sso_enabled);
     const [ssoDomain, setSsoDomain] = useState(company.sso_domain || '');
     const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
 
     const handleSave = async () => {
         setSaving(true);
         setError('');
         try {
-            await adminApi.updateCompany(company.id, {
+            const result = await adminApi.updateCompany(company.id, {
+                name: name.trim() || undefined,
+                slug: slug.trim() || undefined,
                 sso_enabled: ssoEnabled,
-                sso_domain: ssoDomain.trim() || null,
             });
+            // Update sso_domain from response
+            if (result.sso_domain) {
+                setSsoDomain(result.sso_domain);
+            }
+            setSaved(true);
             onUpdated();
-            onClose();
+            // Close after showing saved state
+            setTimeout(() => {
+                onClose();
+            }, 1500);
         } catch (e: any) {
             setError(e.message || 'Failed to update');
         }
@@ -1113,12 +1234,12 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
             backdropFilter: 'blur(4px)',
         }} onClick={onClose}>
             <div className="card" style={{
-                padding: '24px', maxWidth: '440px', width: '90%',
+                padding: '24px', maxWidth: '480px', width: '90%',
                 boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
             }} onClick={e => e.stopPropagation()}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <h2 style={{ fontSize: '16px', fontWeight: 600 }}>
-                        {t('admin.editCompany', 'Edit Company')}: {company.name}
+                        {t('admin.editCompany', 'Edit Company')}
                     </h2>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1128,14 +1249,38 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
                     </button>
                 </div>
                 
-                <h3 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: 'var(--text-secondary)' }}>
-                    {t('admin.ssoConfigTitle', 'SSO & Domain Configuration')}
-                </h3>
-                <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '16px', lineHeight: '1.4' }}>
-                    {t('admin.ssoConfigDesc', 'Configure SSO and custom domain for this company.')}
-                </p>
+                <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <h3 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: 'var(--text-secondary)' }}>
+                        {t('admin.basicInfo', 'Basic Information')}
+                    </h3>
+                    <div style={{ marginBottom: '12px' }}>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>{t('admin.companyName', 'Company Name')}</label>
+                        <input
+                            className="form-input"
+                            value={name}
+                            onChange={e => setName(e.target.value)}
+                            style={{ fontSize: '13px' }}
+                        />
+                    </div>
+                    <div style={{ marginBottom: '12px' }}>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>{t('admin.slug', 'Slug')}</label>
+                        <input
+                            className="form-input"
+                            value={slug}
+                            onChange={e => setSlug(e.target.value)}
+                            placeholder={t('admin.slugPlaceholder', 'e.g. acme')}
+                            style={{ fontSize: '13px' }}
+                        />
+                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                            {t('admin.slugHelp', 'Used for SSO domain: slug.bigbear.cool')}
+                        </div>
+                    </div>
+                </div>
 
                 <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <h3 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: 'var(--text-secondary)' }}>
+                        {t('admin.ssoConfigTitle', 'SSO & Domain Configuration')}
+                    </h3>
                     <div style={{ marginBottom: '12px' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}>
                             <input
@@ -1149,24 +1294,45 @@ function EditCompanyModal({ company, onClose, onUpdated }: { company: any, onClo
                     </div>
 
                     <div>
-                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>{t('admin.ssoDomain', 'Custom Access Domain')}</label>
-                        <input
-                            className="form-input"
-                            value={ssoDomain}
-                            onChange={e => setSsoDomain(e.target.value)}
-                            placeholder={t('admin.ssoDomainPlaceholder', 'e.g. acme.clawith.com')}
-                            style={{ fontSize: '13px' }}
-                        />
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>
+                            {t('admin.ssoDomain', 'SSO Domain (auto-generated)')}
+                        </label>
+                        <div style={{ 
+                            fontSize: '13px', 
+                            padding: '8px 12px', 
+                            background: 'var(--bg-tertiary)', 
+                            borderRadius: '6px',
+                            color: ssoDomain ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                            fontFamily: 'monospace'
+                        }}>
+                            {ssoDomain || t('admin.ssoDomainNotSet', 'Will be auto-generated from slug and platform URL')}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                            {t('admin.ssoDomainNote', 'Format: {slug}.{platform-domain}. Change slug to update.')}
+                        </div>
                     </div>
                 </div>
 
+                {saved && (
+                    <div style={{ 
+                        color: 'var(--success)', 
+                        fontSize: '12px', 
+                        marginBottom: '16px', 
+                        textAlign: 'center',
+                        padding: '8px',
+                        background: 'rgba(34, 197, 94, 0.1)',
+                        borderRadius: '6px'
+                    }}>
+                        ✓ {t('admin.savedSuccess', 'Saved successfully')}
+                    </div>
+                )}
                 {error && <div style={{ color: 'var(--error)', fontSize: '12px', marginBottom: '16px', textAlign: 'center' }}>{error}</div>}
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose} disabled={saving}>
                         {t('common.cancel', 'Cancel')}
                     </button>
-                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>
+                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving || saved}>
                         {saving ? t('common.loading') : t('common.save', 'Save')}
                     </button>
                 </div>

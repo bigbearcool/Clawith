@@ -25,7 +25,7 @@ class Task(Base):
         nullable=False,
     )
     status: Mapped[str] = mapped_column(
-        Enum("pending", "doing", "done", name="task_status_enum"),
+        Enum("pending", "doing", "done", "failed", name="task_status_enum"),
         default="pending",
         nullable=False,
     )
@@ -49,6 +49,7 @@ class Task(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_reason: Mapped[str | None] = mapped_column(Text)
 
     # Relationships
     agent: Mapped["Agent"] = relationship(back_populates="tasks")

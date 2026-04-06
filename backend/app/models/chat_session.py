@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, ForeignKey, func, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, String, Text, ForeignKey, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,12 +19,12 @@ class ChatSession(Base):
     is_group: True for group chat sessions (Feishu group, WeCom group, Slack channel, etc.).
               Group sessions have user_id=NULL and only appear in the 'all sessions' view.
     group_name: Display name for group chat sessions (e.g. the group/channel name from IM platform).
+    last_task_status: Status of the last task in this session (pending, in_progress, completed, failed).
+    last_task_description: Brief description of the last task.
     """
 
     __tablename__ = "chat_sessions"
-    __table_args__ = (
-        UniqueConstraint("agent_id", "external_conv_id", name="uq_chat_sessions_agent_ext_conv"),
-    )
+    __table_args__ = (UniqueConstraint("agent_id", "external_conv_id", name="uq_chat_sessions_agent_ext_conv"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False, index=True)
@@ -37,8 +37,15 @@ class ChatSession(Base):
     is_group: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     group_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Participant identity (unified User/Agent identity)
-    participant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("participants.id"), nullable=True)
+    participant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("participants.id"), nullable=True
+    )
     # For agent-to-agent sessions: the other agent in the conversation
     peer_agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Task status tracking
+    last_task_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_task_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_task_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_task_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
