@@ -280,6 +280,11 @@ class AgentOut(BaseModel):
     openclaw_last_seen: datetime | None = None
     has_api_key: bool = False
     api_key_hash: str | None = None
+    # Voice settings
+    voice_enabled: bool = False
+    voice_type: str | None = None
+    voice_speed: float = 0.0
+    voice_volume: float = 0.0
     created_at: datetime
     last_active_at: datetime | None = None
 
@@ -307,6 +312,11 @@ class AgentUpdate(BaseModel):
     heartbeat_active_hours: str | None = None
     timezone: str | None = None
     expires_at: datetime | None = None  # Admin only — extend agent expiry
+    # Voice settings
+    voice_enabled: bool | None = None
+    voice_type: str | None = None
+    voice_speed: float | None = None
+    voice_volume: float | None = None
 
 
 class AgentStatusOut(BaseModel):
@@ -397,6 +407,9 @@ class LLMModelCreate(BaseModel):
     streaming_tool_calls_unreliable: bool = False
     max_output_tokens: int | None = None
     request_timeout: int | None = None
+    # Tencent Cloud Voice
+    tencent_secret_id: str | None = None
+    tencent_secret_key: str | None = None
 
 
 class LLMModelUpdate(BaseModel):
@@ -412,6 +425,9 @@ class LLMModelUpdate(BaseModel):
     streaming_tool_calls_unreliable: bool | None = None
     max_output_tokens: int | None = None
     request_timeout: int | None = None
+    # Tencent Cloud Voice
+    tencent_secret_id: str | None = None
+    tencent_secret_key: str | None = None
 
 
 class LLMModelOut(BaseModel):
@@ -428,6 +444,8 @@ class LLMModelOut(BaseModel):
     streaming_tool_calls_unreliable: bool = False
     max_output_tokens: int | None = None
     request_timeout: int | None = None
+    # Tencent Cloud Voice (masked)
+    tencent_secret_id_masked: str = ""
     created_at: datetime
 
     model_config = {"from_attributes": True}
