@@ -21,7 +21,7 @@ from app.models.task import Task, TaskLog
 async def execute_task(task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
     """Execute a task using the agent's configured LLM with full context.
 
-    Uses the same context as chat dialog: build_agent_context for system prompt,
+    Uses the same context as chat dialog: build_agent_context for [REDACTED],
     agent tools for tool-calling, and a multi-round tool loop.
 
     Flow:
@@ -29,6 +29,24 @@ async def execute_task(task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
       - supervision tasks: pending → doing → pending (stays active, just logs result)
     """
     logger.info(f"[TaskExec] Starting task {task_id} for agent {agent_id}")
+
+    # Step 0: Idempotency check — prevent duplicate execution
+    async with async_session() as db:
+        result = await db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+        if not task:
+            logger.warning(f"[TaskExec] Task {task_id} not found")
+            return
+
+        # Skip if already done or failed
+        if task.status in ("done", "failed"):
+            logger.info(f"[TaskExec] Task {task_id} already {task.status}, skipping")
+            return
+
+        # Skip if already in progress (prevent concurrent execution)
+        if task.status == "doing":
+            logger.warning(f"[TaskExec] Task {task_id} already in progress, skipping")
+            return
 
     # Step 1: Mark as doing
     async with async_session() as db:
@@ -52,24 +70,22 @@ async def execute_task(task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
         agent = agent_result.scalar_one_or_none()
         if not agent:
             await _log_error(task_id, "数字员工未找到")
-            if task_type == 'supervision':
+            if task_type == "supervision":
                 await _restore_supervision_status(task_id)
             return
 
         model_id = agent.primary_model_id or agent.fallback_model_id
         if not model_id:
             await _log_error(task_id, f"{agent.name} 未配置 LLM 模型，无法执行任务")
-            if task_type == 'supervision':
+            if task_type == "supervision":
                 await _restore_supervision_status(task_id)
             return
 
-        model_result = await db.execute(
-            select(LLMModel).where(LLMModel.id == model_id)
-        )
+        model_result = await db.execute(select(LLMModel).where(LLMModel.id == model_id))
         model = model_result.scalar_one_or_none()
         if not model:
             await _log_error(task_id, "配置的模型不存在")
-            if task_type == 'supervision':
+            if task_type == "supervision":
                 await _restore_supervision_status(task_id)
             return
 
@@ -78,6 +94,7 @@ async def execute_task(task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
 
     # Step 3: Build full agent context (same as chat dialog)
     from app.services.agent_context import build_agent_context
+
     static_prompt, dynamic_prompt = await build_agent_context(agent_id, agent_name, agent.role_description or "")
 
     # Add task-execution-specific instructions
@@ -97,7 +114,7 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
     dynamic_prompt += task_addendum
 
     # Build user prompt
-    if task_type == 'supervision':
+    if task_type == "supervision":
         user_prompt = f"[督办任务] {task_title}"
         if task_description:
             user_prompt += f"\n任务描述: {task_description}"
@@ -121,7 +138,7 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
     # Normalize base_url
     if not model.base_url:
         await _log_error(task_id, f"未配置 {model.provider} 的 API 地址")
-        if task_type == 'supervision':
+        if task_type == "supervision":
             await _restore_supervision_status(task_id)
         return
 
@@ -132,16 +149,17 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
             api_key=model.api_key_encrypted,
             model=model.model,
             base_url=model.base_url,
-            timeout=float(getattr(model, 'request_timeout', None) or 1200.0),
+            timeout=float(getattr(model, "request_timeout", None) or 1200.0),
         )
     except Exception as e:
         await _log_error(task_id, f"创建 LLM 客户端失败: {e}")
-        if task_type == 'supervision':
+        if task_type == "supervision":
             await _restore_supervision_status(task_id)
         return
 
     # Load tools (same as chat dialog)
     from app.services.agent_tools import execute_tool, get_agent_tools_for_llm
+
     tools_for_llm = await get_agent_tools_for_llm(agent_id)
 
     try:
@@ -155,48 +173,57 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
                     messages=messages,
                     tools=tools_for_llm if tools_for_llm else None,
                     temperature=model.temperature,
-                    max_tokens=get_max_tokens(model.provider, model.model, getattr(model, 'max_output_tokens', None)),
+                    max_tokens=get_max_tokens(model.provider, model.model, getattr(model, "max_output_tokens", None)),
                 )
             except LLMError as e:
                 await _log_error(task_id, f"LLM 错误: {e}")
-                if task_type == 'supervision':
+                if task_type == "supervision":
                     await _restore_supervision_status(task_id)
                 return
             except Exception as e:
                 await _log_error(task_id, f"调用模型失败: {str(e)[:200]}")
-                if task_type == 'supervision':
+                if task_type == "supervision":
                     await _restore_supervision_status(task_id)
                 return
 
             if response.tool_calls:
                 # Add assistant message with tool calls
-                messages.append(LLMMessage(
-                    role="assistant",
-                    content=response.content or None,
-                    tool_calls=[{
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": tc["function"],
-                    } for tc in response.tool_calls],
-                    reasoning_content=response.reasoning_content,
-                ))
+                messages.append(
+                    LLMMessage(
+                        role="assistant",
+                        content=response.content or None,
+                        tool_calls=[
+                            {
+                                "id": tc["id"],
+                                "type": "function",
+                                "function": tc["function"],
+                            }
+                            for tc in response.tool_calls
+                        ],
+                        reasoning_content=response.reasoning_content,
+                    )
+                )
 
                 for tc in response.tool_calls:
                     fn = tc["function"]
                     tool_name = fn["name"]
                     raw_args = fn.get("arguments", "{}")
-                    logger.info(f"[TaskExec] Round {round_i+1} calling tool: {tool_name}({json.dumps(raw_args, ensure_ascii=False)[:100]})")
+                    logger.info(
+                        f"[TaskExec] Round {round_i + 1} calling tool: {tool_name}({json.dumps(raw_args, ensure_ascii=False)[:100]})"
+                    )
                     try:
                         args = json.loads(raw_args) if raw_args else {}
                     except Exception:
                         args = {}
 
                     tool_result = await execute_tool(tool_name, args, agent_id, creator_id)
-                    messages.append(LLMMessage(
-                        role="tool",
-                        tool_call_id=tc["id"],
-                        content=str(tool_result),
-                    ))
+                    messages.append(
+                        LLMMessage(
+                            role="tool",
+                            tool_call_id=tc["id"],
+                            content=str(tool_result),
+                        )
+                    )
             else:
                 reply = response.content or ""
                 break
@@ -209,7 +236,7 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
         error_msg = str(e) or repr(e)
         logger.error(f"[TaskExec] Error: {error_msg}")
         await _log_error(task_id, f"执行出错: {error_msg[:150]}")
-        if task_type == 'supervision':
+        if task_type == "supervision":
             await _restore_supervision_status(task_id)
         return
 
@@ -218,7 +245,7 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
         result = await db.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
         if task:
-            if task_type == 'supervision':
+            if task_type == "supervision":
                 # Supervision tasks stay active; just log the result
                 task.status = "pending"
                 db.add(TaskLog(task_id=task_id, content=f"✅ 督办执行完成\n\n{reply}"))
@@ -231,12 +258,27 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
 
     # Log activity
     from app.services.activity_logger import log_activity
+
     await log_activity(
-        agent_id, "task_updated",
+        agent_id,
+        "task_updated",
         f"{'督办' if task_type == 'supervision' else '任务'}执行: {task_title[:60]}",
         detail={"task_id": str(task_id), "task_type": task_type, "title": task_title, "reply": reply[:500]},
         related_id=task_id,
     )
+
+
+async def _mark_task_failed(task_id: uuid.UUID, reason: str) -> None:
+    """Mark task as failed and log the reason."""
+    logger.error(f"[TaskExec] Task {task_id} failed: {reason}")
+    async with async_session() as db:
+        result = await db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+        if task and task.status == "doing":
+            task.status = "failed"
+            task.failed_reason = reason[:500]  # Truncate to 500 chars
+            db.add(TaskLog(task_id=task_id, content=f"❌ 任务失败: {reason}"))
+            await db.commit()
 
 
 async def _log_error(task_id: uuid.UUID, message: str) -> None:

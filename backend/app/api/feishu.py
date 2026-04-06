@@ -871,14 +871,15 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     )
                     elements.append({"tag": "hr"})
 
-                # Main content with length limit (Feishu has a 30000 char limit per element)
-                MAX_CARD_CONTENT_LENGTH = 10000  # Conservative limit for better UX
+                # Main content - Feishu card supports up to 30000 chars per element
+                MAX_CARD_CONTENT_LENGTH = 28000
                 body = answer_text + ("▌" if streaming and answer_text else ("..." if streaming else ""))
                 if len(body) > MAX_CARD_CONTENT_LENGTH:
-                    body = body[:MAX_CARD_CONTENT_LENGTH] + "\n\n...(内容过长，已截断)"
+                    # Truncate for card, but full content will be sent as plain text later
                     logger.warning(
-                        f"[Feishu] Card content truncated from {len(answer_text)} to {MAX_CARD_CONTENT_LENGTH} chars"
+                        f"[Feishu] Card content truncated from {len(answer_text)} to {MAX_CARD_CONTENT_LENGTH} chars, full text will follow"
                     )
+                    body = body[:MAX_CARD_CONTENT_LENGTH] + "\n\n...(内容过长，完整内容见下方纯文本消息)"
                 elements.append({"tag": "markdown", "content": body or "..."})
                 return {
                     "config": {"update_multi": True},
@@ -937,6 +938,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 if not msg_id_for_patch:
                     return
                 _stream_buffer.append(text)
+                logger.debug(f"[Feishu] on_chunk: len={len(text)}, total_buffer={len(_stream_buffer)}")
                 await _flush_stream("chunk")
 
             async def _ws_on_thinking(text: str):
@@ -978,6 +980,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 _heartbeat_task = asyncio.create_task(_heartbeat())
 
             # Call LLM with history and streaming callback
+            logger.info(f"[Feishu] Starting LLM call for agent {agent_id}")
             try:
                 reply_text = await _call_agent_llm(
                     db,
@@ -989,8 +992,16 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     on_thinking=_ws_on_thinking,
                     on_tool_call=_ws_on_tool_call,
                 )
+                logger.info(f"[Feishu] LLM call returned, reply_text len={len(reply_text) if reply_text else 0}")
+            except Exception as e:
+                logger.error(f"[Feishu] LLM call failed: {e}")
+                import traceback
+
+                traceback.print_exc()
+                reply_text = f"⚠️ LLM 调用失败: {str(e)[:100]}"
             finally:
                 _llm_done = True
+                logger.info(f"[Feishu] LLM done, stream_buffer len={len(_stream_buffer)}")
                 if _heartbeat_task:
                     _heartbeat_task.cancel()
                     try:
@@ -999,7 +1010,16 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                         pass
                 _cfs.reset(_cfs_token)
                 _cfso.reset(_cfso_token)
-            logger.info(f"[Feishu] LLM reply: {reply_text[:100]}")
+
+            # Use reply_text directly as the final content
+            # The _stream_buffer may be incomplete for some providers (e.g., MiniMax)
+            # that don't stream content after tool calls.
+            # reply_text contains the full accumulated content from all LLM rounds.
+            final_reply_text = reply_text.strip() if reply_text else ""
+
+            logger.info(
+                f"[Feishu] LLM done, reply_text len={len(final_reply_text)}, stream_buffer len={len(_stream_buffer)}"
+            )
 
             # Mark task as completed
             _sess.last_task_status = "completed"
@@ -1007,13 +1027,16 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             await db.commit()
 
             # Send final card update or fallback text
+            # Check if content was truncated (exceeds 28000 chars)
+            _content_truncated = len(final_reply_text) > 28000
+
             if msg_id_for_patch:
                 try:
                     await _patch_queue.drain()
                 except Exception as e:
                     logger.warning(f"[Feishu] Drain patch queue failed before final patch: {e}")
                 final_card = _build_card(
-                    reply_text,
+                    final_reply_text,
                     "".join(_thinking_buffer),
                     streaming=False,
                 )
@@ -1025,6 +1048,32 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                         _json_card.dumps(final_card),
                         stage="stream_final",
                     )
+
+                    # If card was truncated, send full text as separate message
+                    if _content_truncated:
+                        logger.info(f"[Feishu] Sending full text ({len(final_reply_text)} chars) after truncated card")
+                        try:
+                            if chat_type == "group" and chat_id:
+                                await feishu_service.send_message(
+                                    config.app_id,
+                                    config.app_secret,
+                                    chat_id,
+                                    "text",
+                                    _json.dumps({"text": final_reply_text}),
+                                    receive_id_type="chat_id",
+                                    stage="full_text_after_card",
+                                )
+                            else:
+                                await feishu_service.send_message(
+                                    config.app_id,
+                                    config.app_secret,
+                                    sender_open_id,
+                                    "text",
+                                    _json.dumps({"text": final_reply_text}),
+                                    stage="full_text_after_card",
+                                )
+                        except Exception as _full_err:
+                            logger.error(f"[Feishu] Failed to send full text: {_full_err}")
                 except Exception as e:
                     logger.error(f"[Feishu] Final card patch failed: {e}")
                     if chat_type == "group" and chat_id:
@@ -1033,7 +1082,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                             config.app_secret,
                             chat_id,
                             "text",
-                            _json.dumps({"text": reply_text}),
+                            _json.dumps({"text": final_reply_text}),
                             receive_id_type="chat_id",
                             stage="stream_final_fallback_text",
                         )
@@ -1043,7 +1092,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                             config.app_secret,
                             sender_open_id,
                             "text",
-                            _json.dumps({"text": reply_text}),
+                            _json.dumps({"text": final_reply_text}),
                             stage="stream_final_fallback_text",
                         )
             else:
@@ -1055,7 +1104,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                             config.app_secret,
                             chat_id,
                             "text",
-                            _json.dumps({"text": reply_text}),
+                            _json.dumps({"text": final_reply_text}),
                             receive_id_type="chat_id",
                             stage="stream_no_card_fallback_text",
                         )
@@ -1065,7 +1114,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                             config.app_secret,
                             sender_open_id,
                             "text",
-                            _json.dumps({"text": reply_text}),
+                            _json.dumps({"text": final_reply_text}),
                             stage="stream_no_card_fallback_text",
                         )
                 except Exception as e:
@@ -1077,8 +1126,8 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             await log_activity(
                 agent_id,
                 "chat_reply",
-                f"回复了飞书消息: {reply_text[:80]}",
-                detail={"channel": "feishu", "user_text": user_text[:200], "reply": reply_text[:500]},
+                f"回复了飞书消息: {final_reply_text[:80]}",
+                detail={"channel": "feishu", "user_text": user_text[:200], "reply": final_reply_text[:500]},
             )
 
             # If task creation detected, create a real Task record
@@ -1107,7 +1156,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                         await db.commit()
                         await db.refresh(task_obj)
                         _asyncio.create_task(execute_task(task_obj.id, agent_id))
-                        reply_text += f"\n\n📋 已同步创建任务到任务面板：【{task_title}】"
+                        final_reply_text += f"\n\n📋 已同步创建任务到任务面板：【{task_title}】"
                         logger.info(f"[Feishu] Created task: {task_title}")
                     except Exception as e:
                         logger.error(f"[Feishu] Failed to create task: {e}")
@@ -1118,7 +1167,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     agent_id=agent_id,
                     user_id=platform_user_id,
                     role="assistant",
-                    content=reply_text,
+                    content=final_reply_text,
                     conversation_id=session_conv_id,
                 )
             )
@@ -1449,7 +1498,14 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                     except Exception:
                         pass
 
-        logger.info(f"[Feishu] Image LLM reply: {reply_text[:100]}")
+        logger.info(f"[Feishu] Image LLM reply (returned): {reply_text[:100]}")
+
+        # Use accumulated stream buffer as the final reply text
+        # This ensures we have the complete text even when LLM returns empty response.content
+        accumulated_text = "".join(_img_stream_buf).strip()
+        final_reply_text = reply_text.strip() if reply_text else ""
+
+        logger.info(f"[Feishu] Image LLM reply (accumulated): {accumulated_text[:100]}")
 
         # Send final card or fallback text
         if _patch_msg_id:
@@ -1459,7 +1515,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                 logger.warning(f"[Feishu] Image patch queue drain failed: {_e_drain}")
             # Build final card via shared builder (consistent with text streaming path).
             _final_card = _build_card(
-                reply_text or "...",
+                final_reply_text or "...",
                 streaming=False,
                 agent_name=_agent_name,
             )
@@ -1477,7 +1533,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                     config.app_secret,
                     _reply_to,
                     "text",
-                    json.dumps({"text": reply_text}),
+                    json.dumps({"text": final_reply_text}),
                     receive_id_type=_rid_type,
                     stage="image_stream_fallback_text",
                 )
@@ -1491,7 +1547,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                     agent_id=agent_id,
                     user_id=platform_user_id,
                     role="assistant",
-                    content=reply_text,
+                    content=final_reply_text,
                     conversation_id=session_conv_id,
                 )
             )
@@ -1503,7 +1559,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
         await log_activity(
             agent_id,
             "chat_reply",
-            f"回复了飞书图片消息: {reply_text[:80]}",
+            f"回复了飞书图片消息: {final_reply_text[:80]}",
             detail={"channel": "feishu", "type": "image"},
         )
         return
