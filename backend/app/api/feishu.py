@@ -419,7 +419,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             msg_type = "text"
             logger.info(f"[Feishu] Normalized post → text='{_extracted_text[:100]}', images={len(_image_markers)}")
 
-        if msg_type in ("file", "image"):
+        if msg_type in ("file", "image", "audio"):
             import asyncio as _asyncio
 
             _asyncio.create_task(_handle_feishu_file(db, agent_id, config, message, sender_open_id, chat_type, chat_id))
@@ -431,6 +431,9 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
 
             content = json.loads(message.get("content", "{}"))
             user_text = content.get("text", "")
+
+            # Mark as text source (not voice)
+            _voice_source = False
 
             # Strip @mention tags (e.g. @_user_1) from group messages
             user_text = re.sub(r"@_user_\d+", "", user_text).strip()
@@ -1128,6 +1131,10 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
         file_key = content.get("image_key", "")
         filename = f"image_{file_key[-8:]}.jpg" if file_key else "image.jpg"
         res_type = "image"
+    elif msg_type == "audio":
+        file_key = content.get("file_key", "")
+        filename = f"voice_{file_key[-8:]}.opus" if file_key else "voice.opus"
+        res_type = "file"
     else:
         file_key = content.get("file_key", "")
         filename = content.get("file_name") or f"file_{file_key[-8:]}.bin"
@@ -1296,6 +1303,169 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
         _history = [{"role": m.role, "content": m.content} for m in reversed(_hist_r.scalars().all())]
 
         await db.commit()
+
+    # For audio: ASR → text → LLM → TTS response (if enabled)
+    if msg_type == "audio":
+        import json as _json_audio
+
+        # Get Agent and LLM model to check Tencent credentials
+        async with _async_session() as db:
+            agent_r = await db.execute(_select(AgentModel).where(AgentModel.id == agent_id))
+            agent_obj = agent_r.scalar_one_or_none()
+
+            # Check if voice is enabled
+            if not agent_obj or not getattr(agent_obj, "voice_enabled", False):
+                # Voice not enabled, just acknowledge
+                _reply_to = chat_id if chat_type == "group" else sender_open_id
+                _rid_type = "chat_id" if chat_type == "group" else "open_id"
+                await feishu_service.send_message(
+                    config.app_id,
+                    config.app_secret,
+                    _reply_to,
+                    "text",
+                    _json_audio.dumps({"text": "收到语音消息，但该 Agent 未启用语音回复功能。"}),
+                    receive_id_type=_rid_type,
+                )
+                return
+
+            # Get LLM model for Tencent credentials
+            model_id = agent_obj.primary_model_id
+            if not model_id:
+                logger.error(f"[Feishu Audio] Agent {agent_id} has no primary model")
+                return
+
+            from app.models.llm import LLMModel
+
+            model_r = await db.execute(_select(LLMModel).where(LLMModel.id == model_id))
+            llm_model = model_r.scalar_one_or_none()
+
+            if not llm_model or not getattr(llm_model, "tencent_secret_id", None):
+                logger.error(f"[Feishu Audio] LLM model {model_id} missing Tencent credentials")
+                return
+
+            # Initialize Tencent Voice Service
+            from app.services.tencent_voice import TencentVoiceService
+
+            tencent_voice = TencentVoiceService(llm_model.tencent_secret_id, llm_model.tencent_secret_key)
+
+            # ASR: convert audio to text
+            try:
+                transcript = await tencent_voice.asr_one_sentence(file_bytes, format="opus")
+                logger.info(f"[Feishu Audio] ASR result: {transcript[:100]}")
+            except Exception as e:
+                logger.error(f"[Feishu Audio] ASR failed: {e}")
+                _reply_to = chat_id if chat_type == "group" else sender_open_id
+                _rid_type = "chat_id" if chat_type == "group" else "open_id"
+                await feishu_service.send_message(
+                    config.app_id,
+                    config.app_secret,
+                    _reply_to,
+                    "text",
+                    _json_audio.dumps({"text": f"语音识别失败: {str(e)}"}),
+                    receive_id_type=_rid_type,
+                )
+                return
+
+            # Save transcript as user message
+            db.add(
+                ChatMessage(
+                    agent_id=agent_id,
+                    user_id=platform_user_id,
+                    role="user",
+                    content=f"[语音] {transcript}",
+                    conversation_id=session_conv_id,
+                )
+            )
+            await db.commit()
+
+            # Get voice settings
+            voice_type = getattr(agent_obj, "voice_type", "101001") or "101001"
+            voice_speed = getattr(agent_obj, "voice_speed", 0.0) or 0.0
+            voice_volume = getattr(agent_obj, "voice_volume", 0.0) or 0.0
+
+            # Extract voice_id (format: "tencent:101001" or just "101001")
+            if ":" in str(voice_type):
+                voice_type = voice_type.split(":")[-1]
+
+        # Call LLM (reuse existing logic from process_feishu_event)
+        # For simplicity, we'll call call_llm directly
+        from app.api.websocket import call_llm
+        from app.models.llm import LLMModel
+
+        async with _async_session() as db:
+            model_r = await db.execute(_select(LLMModel).where(LLMModel.id == agent_obj.primary_model_id))
+            model = model_r.scalar_one_or_none()
+
+            if not model:
+                return
+
+            # Load history
+            _hist_r = await db.execute(
+                _select(ChatMessage)
+                .where(ChatMessage.agent_id == agent_id, ChatMessage.conversation_id == session_conv_id)
+                .order_by(ChatMessage.created_at.desc())
+                .limit(ctx_size)
+            )
+            history = [{"role": m.role, "content": m.content} for m in reversed(_hist_r.scalars().all())]
+
+            # Call LLM
+            reply_text = await call_llm(
+                model=model,
+                messages=history,
+                system_prompt=agent_obj.role_description or "",
+                tools=None,
+                agent_id=agent_id,
+                user_id=platform_user_id,
+                session_id=session_conv_id,
+            )
+
+            # Save assistant message
+            db.add(
+                ChatMessage(
+                    agent_id=agent_id,
+                    user_id=platform_user_id,
+                    role="assistant",
+                    content=reply_text,
+                    conversation_id=session_conv_id,
+                )
+            )
+            await db.commit()
+
+        # Generate voice reply
+        try:
+            audio_bytes = await tencent_voice.tts_synthesis(
+                text=reply_text, voice_type=voice_type, speed=voice_speed, volume=voice_volume, codec="mp3"
+            )
+
+            # Upload audio to Feishu
+            file_key = await feishu_service.upload_audio(
+                config.app_id, config.app_secret, audio_bytes, file_name=f"reply_{int(time.time())}.mp3"
+            )
+
+            # Send audio message
+            _reply_to = chat_id if chat_type == "group" else sender_open_id
+            _rid_type = "chat_id" if chat_type == "group" else "open_id"
+            await feishu_service.send_audio_message(
+                config.app_id, config.app_secret, _reply_to, file_key, receive_id_type=_rid_type
+            )
+
+            logger.info(f"[Feishu Audio] Voice reply sent: {len(audio_bytes)} bytes")
+
+        except Exception as e:
+            logger.error(f"[Feishu Audio] TTS failed: {e}")
+            # Fallback: send text message
+            _reply_to = chat_id if chat_type == "group" else sender_open_id
+            _rid_type = "chat_id" if chat_type == "group" else "open_id"
+            await feishu_service.send_message(
+                config.app_id,
+                config.app_secret,
+                _reply_to,
+                "text",
+                _json_audio.dumps({"text": reply_text}),
+                receive_id_type=_rid_type,
+            )
+
+        return
 
     # For images: call LLM so vision models can actually see the image
     if msg_type == "image":

@@ -535,5 +535,94 @@ class FeishuService:
             )
             return resp.json()
 
+    async def upload_audio(
+        self,
+        app_id: str,
+        app_secret: str,
+        audio_bytes: bytes,
+        file_name: str = "voice.mp3",
+    ) -> str:
+        """Upload audio file to Feishu and return file_key.
+
+        Args:
+            app_id: Feishu app ID
+            app_secret: Feishu app secret
+            audio_bytes: Audio binary data (mp3 format)
+            file_name: Audio file name
+
+        Returns:
+            file_key for sending audio message
+        """
+        async with httpx.AsyncClient(timeout=60) as client:
+            # Get token
+            token_resp = await client.post(
+                FEISHU_APP_TOKEN_URL,
+                json={
+                    "app_id": app_id,
+                    "app_secret": app_secret,
+                },
+            )
+            app_token = token_resp.json().get("app_access_token", "")
+            headers = {"Authorization": f"Bearer {app_token}"}
+
+            # Upload audio file
+            upload_resp = await client.post(
+                "https://open.feishu.cn/open-apis/im/v1/files",
+                files={"file": (file_name, audio_bytes, "audio/mpeg")},
+                data={"file_type": "stream", "file_name": file_name},
+                headers=headers,
+            )
+            upload_data = upload_resp.json()
+            if upload_data.get("code") != 0:
+                raise RuntimeError(f"Feishu audio upload failed: {upload_data.get('msg')}")
+
+            file_key = upload_data["data"]["file_key"]
+            logger.info(f"[Feishu] Audio uploaded: {file_name}, size={len(audio_bytes)}")
+            return file_key
+
+    async def send_audio_message(
+        self,
+        app_id: str,
+        app_secret: str,
+        receive_id: str,
+        file_key: str,
+        receive_id_type: str = "chat_id",
+    ) -> dict:
+        """Send audio message via Feishu.
+
+        Args:
+            app_id: Feishu app ID
+            app_secret: Feishu app secret
+            receive_id: Receiver ID (chat_id or open_id)
+            file_key: Audio file key from upload_audio
+            receive_id_type: ID type (chat_id, open_id)
+
+        Returns:
+            Response dict
+        """
+        import json as _json
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Get token
+            token_resp = await client.post(
+                FEISHU_APP_TOKEN_URL,
+                json={
+                    "app_id": app_id,
+                    "app_secret": app_secret,
+                },
+            )
+            app_token = token_resp.json().get("app_access_token", "")
+            headers = {"Authorization": f"Bearer {app_token}"}
+
+            # Send audio message
+            resp = await client.post(
+                f"{FEISHU_SEND_MSG_URL}?receive_id_type={receive_id_type}",
+                json={"receive_id": receive_id, "msg_type": "audio", "content": _json.dumps({"file_key": file_key})},
+                headers=headers,
+            )
+            result = resp.json()
+            logger.info(f"[Feishu] Audio message sent to {receive_id}")
+            return result
+
 
 feishu_service = FeishuService()

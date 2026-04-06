@@ -172,11 +172,21 @@ async def add_llm_model(
         streaming_tool_calls_unreliable=data.streaming_tool_calls_unreliable,
         max_output_tokens=data.max_output_tokens,
         request_timeout=data.request_timeout,
+        tencent_secret_id=data.tencent_secret_id,  # Tencent Cloud Voice
+        tencent_secret_key=data.tencent_secret_key,
         tenant_id=uuid.UUID(tid) if tid else None,
     )
     db.add(model)
     await db.flush()
-    return LLMModelOut.model_validate(model)
+
+    # Prepare output with masked secrets
+    out = LLMModelOut.model_validate(model)
+    key = model.api_key_encrypted or ""
+    out.api_key_masked = f"****{key[-4:]}" if len(key) > 4 else "****"
+    tencent_id = model.tencent_secret_id or ""
+    out.tencent_secret_id_masked = f"****{tencent_id[-4:]}" if len(tencent_id) > 4 else ""
+
+    return out
 
 
 @router.delete("/llm-models/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -255,10 +265,25 @@ async def update_llm_model(
             model.max_output_tokens = data.max_output_tokens
         if hasattr(data, "request_timeout") and data.request_timeout is not None:
             model.request_timeout = data.request_timeout
+        # Tencent Cloud Voice settings
+        if hasattr(data, "tencent_secret_id") and data.tencent_secret_id is not None:
+            if data.tencent_secret_id.strip() and not data.tencent_secret_id.startswith("****"):
+                model.tencent_secret_id = data.tencent_secret_id.strip()
+        if hasattr(data, "tencent_secret_key") and data.tencent_secret_key is not None:
+            if data.tencent_secret_key.strip() and not data.tencent_secret_key.startswith("****"):
+                model.tencent_secret_key = data.tencent_secret_key.strip()
 
         await db.commit()
         await db.refresh(model)
-        return LLMModelOut.model_validate(model)
+
+        # Prepare output with masked secrets
+        out = LLMModelOut.model_validate(model)
+        key = model.api_key_encrypted or ""
+        out.api_key_masked = f"****{key[-4:]}" if len(key) > 4 else "****"
+        tencent_id = model.tencent_secret_id or ""
+        out.tencent_secret_id_masked = f"****{tencent_id[-4:]}" if len(tencent_id) > 4 else ""
+
+        return out
     except SQLAlchemyError as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update model")
