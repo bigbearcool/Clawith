@@ -817,14 +817,32 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                 await db.flush()
                 await self._reconcile(db, provider.id, sync_start)
                 await db.flush()
-                await self._update_member_counts(db, provider.id)
-                await db.flush()
+await self._update_member_counts(db, provider.id)
+            await db.flush()
 
         except Exception as e:
             import traceback
 
             logger.error(f"[OrgSync] Critical error during sync: {e}\n{traceback.format_exc()}")
-            errors.append(f"Critical: {str(e)}")
+            
+            # Provide user-friendly error message
+            error_msg = str(e)
+            if "ConnectTimeout" in error_msg or "timeout" in error_msg.lower():
+                errors.append(
+                    f"⚠️ 网络超时：连接飞书 API 失败。可能原因：\n"
+                    f"1. 网络不稳定或代理配置问题\n"
+                    f"2. 飞书 API 服务响应慢\n"
+                    f"请稍后重试，或检查网络配置。"
+                )
+            elif "permission" in error_msg.lower() or "99991663" in error_msg or "99991664" in error_msg:
+                errors.append(
+                    f"⚠️ 权限不足：飞书应用缺少必要权限。\n"
+                    f"请在飞书开放平台添加以下权限并重新发布版本：\n"
+                    f"1. contact:user.base:readonly (获取用户基本信息)\n"
+                    f"2. contact:department.base:readonly (获取部门信息)"
+                )
+            else:
+                errors.append(f"⚠️ 同步失败：{error_msg}")
 
         # Add permission warning if very few users synced
         if len(all_users) < 5 and self.provider_type == "feishu":
@@ -859,7 +877,7 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
         page_token = ""
         page_num = 0
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             while True:
                 # Global user list API - no department_id required
                 params = {
