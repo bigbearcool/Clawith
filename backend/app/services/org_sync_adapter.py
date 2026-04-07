@@ -279,6 +279,37 @@ class BaseOrgSyncAdapter(ABC):
         # 3. Update department member counts (aggregate: direct + all descendants)
         for d_id, d_data in dept_map.items():
             await db.execute(update(OrgDepartment).where(OrgDepartment.id == d_id).values(member_count=d_data["total"]))
+
+    async def _ensure_provider(self, db: AsyncSession) -> IdentityProvider:
+        """Ensure IdentityProvider record exists."""
+        if self.provider:
+            return self.provider
+
+        # If we have an ID, look it up
+        if hasattr(self, "provider_id") and self.provider_id:
+            result = await db.execute(select(IdentityProvider).where(IdentityProvider.id == self.provider_id))
+            self.provider = result.scalar_one_or_none()
+            if self.provider:
+                return self.provider
+
+        # Fallback by type (scoped by tenant)
+        query = select(IdentityProvider).where(IdentityProvider.provider_type == self.provider_type)
+        if self.tenant_id:
+            query = query.where(IdentityProvider.tenant_id == self.tenant_id)
+        else:
+            query = query.where(IdentityProvider.tenant_id.is_(None))
+
+        result = await db.execute(query)
+        provider = result.scalar_one_or_none()
+
+        if not provider:
+            provider = IdentityProvider(
+                provider_type=self.provider_type,
+                name=self.provider_type.capitalize(),
+                is_active=True,
+                config=self.config,
+                tenant_id=self.tenant_id,
+            )
             db.add(provider)
             await db.flush()
 
