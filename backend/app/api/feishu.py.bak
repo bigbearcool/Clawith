@@ -419,7 +419,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             msg_type = "text"
             logger.info(f"[Feishu] Normalized post → text='{_extracted_text[:100]}', images={len(_image_markers)}")
 
-        if msg_type in ("file", "image", "audio", "voice"):
+        if msg_type in ("file", "image"):
             import asyncio as _asyncio
 
             _asyncio.create_task(_handle_feishu_file(db, agent_id, config, message, sender_open_id, chat_type, chat_id))
@@ -483,7 +483,45 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 .limit(ctx_size)
             )
             history_msgs = history_result.scalars().all()
-            history = [{"role": m.role, "content": m.content} for m in reversed(history_msgs)]
+
+            # Format history with task context awareness
+            def _format_history_with_task_context(messages, session):
+                """Format history to help LLM understand completed vs pending tasks."""
+                formatted = []
+
+                for m in messages:
+                    # Compress tool-related messages to avoid confusion
+                    if m.role == "assistant":
+                        # Check if this looks like a tool call or tool result
+                        content = m.content or ""
+                        if any(marker in content.lower() for marker in ["tool_calls", "executed:", "工具", "调用"]):
+                            formatted.append({"role": "assistant", "content": "[已执行工具操作]"})
+                            continue
+
+                    formatted.append({"role": m.role, "content": m.content or ""})
+
+                # Add task context separator
+                if formatted and session and session.last_task_status:
+                    task_context = []
+                    if session.last_task_status == "completed":
+                        task_context.append(
+                            {
+                                "role": "system",
+                                "content": f"--- 历史任务已完成 ---\n任务描述: {session.last_task_description or 'N/A'}\n状态: 已完成\n\n以下是新的对话:",
+                            }
+                        )
+                    elif session.last_task_status == "in_progress":
+                        task_context.append(
+                            {
+                                "role": "system",
+                                "content": f"--- 上一任务正在进行中 ---\n任务描述: {session.last_task_description or 'N/A'}\n状态: 进行中\n\n如果用户的新消息与之前的任务无关，请直接回答新问题。",
+                            }
+                        )
+                    formatted.extend(task_context)
+
+                return formatted
+
+            history = _format_history_with_task_context(reversed(history_msgs), _pre_sess)
 
             # --- Resolve Feishu sender identity & find/create platform user ---
             import uuid as _uuid
@@ -617,6 +655,13 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 )
             )
             _sess.last_message_at = _dt.now(_tz.utc)
+
+            # Mark task as in_progress
+            _sess.last_task_status = "in_progress"
+            _sess.last_task_description = user_text[:200]  # Brief description
+            _sess.last_task_started_at = _dt.now(_tz.utc)
+            _sess.last_task_completed_at = None  # Clear previous completion
+
             await db.commit()
 
             # Prepend sender identity so the agent knows who is talking
@@ -716,93 +761,54 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
 
             _cfs_token = _cfs.set(_feishu_file_sender)
 
-            # Set up streaming response via CardKit (primary) or IM patch (fallback)
+            # Set up streaming response via interactive card
             import json as _json_card
 
-            cardkit_card_id: str | None = None
-            cardkit_sequence: int = 0
-            msg_id_for_patch: str | None = None
-
-            _reply_target = chat_id if chat_type == "group" and chat_id else sender_open_id
-            _rid_type = "chat_id" if chat_type == "group" and chat_id else "open_id"
-
+            # Send initial loading card
             init_card = {
-                "schema": "2.0",
-                "config": {
-                    "streaming_mode": True,
-                    "locales": ["zh_cn", "en_us"],
-                    "summary": {"content": "思考中..."},
-                },
-                "body": {
-                    "elements": [
-                        {
-                            "tag": "markdown",
-                            "content": "",
-                            "text_align": "left",
-                            "text_size": "normal_v2",
-                            "element_id": "streaming_content",
-                        },
-                        {
-                            "tag": "markdown",
-                            "content": " ",
-                            "icon": {
-                                "tag": "custom_icon",
-                                "img_key": "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg",
-                                "size": "16px 16px",
-                            },
-                            "element_id": "loading_icon",
-                        },
-                    ]
-                },
+                "config": {"update_multi": True},
+                "header": {"template": "blue", "title": {"content": "思考中...", "tag": "plain_text"}},
+                "elements": [{"tag": "markdown", "content": "..."}],
             }
-
+            msg_id_for_patch = None
             try:
-                cardkit_card_id = await feishu_service.create_card_entity(config.app_id, config.app_secret, init_card)
-                cardkit_sequence = 1
-                await feishu_service.send_card_by_card_id(
-                    config.app_id,
-                    config.app_secret,
-                    _reply_target,
-                    cardkit_card_id,
-                    receive_id_type=_rid_type,
-                )
-                logger.info(f"[Feishu] CardKit card created and sent: card_id={cardkit_card_id}")
-            except Exception as e:
-                logger.warning(f"[Feishu] CardKit flow failed, falling back to IM patch: {e}")
-                cardkit_card_id = None
-                init_card_fallback = {
-                    "config": {"update_multi": True},
-                    "header": {"template": "blue", "title": {"content": "思考中...", "tag": "plain_text"}},
-                    "elements": [{"tag": "markdown", "content": "..."}],
-                }
-                try:
+                if chat_type == "group" and chat_id:
                     init_resp = await feishu_service.send_message(
                         config.app_id,
                         config.app_secret,
-                        _reply_target,
+                        chat_id,
                         "interactive",
-                        _json_card.dumps(init_card_fallback),
-                        receive_id_type=_rid_type,
-                        stage="stream_init_card",
+                        _json_card.dumps(init_card),
+                        receive_id_type="chat_id",
                     )
-                    msg_id_for_patch = init_resp.get("data", {}).get("message_id")
-                except Exception as e2:
-                    logger.error(f"[Feishu] Fallback init card also failed: {e2}")
+                else:
+                    init_resp = await feishu_service.send_message(
+                        config.app_id,
+                        config.app_secret,
+                        sender_open_id,
+                        "interactive",
+                        _json_card.dumps(init_card),
+                        receive_id_type="open_id",
+                    )
+                msg_id_for_patch = init_resp.get("data", {}).get("message_id")
+            except Exception as e:
+                logger.error(f"[Feishu] Failed to send init stream card: {e}")
 
             _stream_buffer = []
             _thinking_buffer = []
             _last_flush_time = time.time()
-            _FLUSH_INTERVAL_CARDKIT = 0.5
-            _FLUSH_INTERVAL_PATCH = 1.0
+            _FLUSH_INTERVAL = 1.0  # Update Feishu once per second to avoid limits
             _agent_name = agent_obj.name if agent_obj else "AI 回复"
+            # Tool status tracking:
+            # - _tool_status_running: dict of call_id -> display line for tools still in flight.
+            #   Cleared when the tool completes so the "running" icon never lingers.
+            # - _tool_status_done: ordered list of completed tool status lines (trimmed to N).
             _tool_status_running: dict[str, str] = {}
             _tool_status_done: list[str] = []
             _patch_queue = _SerialPatchQueue()
             _heartbeat_task: asyncio.Task | None = None
             _llm_done = False
-            _last_flushed_hash: int = 0
-            _last_flushed_text: str = ""
-            _flush_lock = asyncio.Lock()
+            _last_flushed_hash: int = 0  # Content hash to skip no-op heartbeat patches
 
             def _build_card(
                 answer_text: str,
@@ -865,7 +871,15 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     )
                     elements.append({"tag": "hr"})
 
+                # Main content - Feishu card supports up to 30000 chars per element
+                MAX_CARD_CONTENT_LENGTH = 28000
                 body = answer_text + ("▌" if streaming and answer_text else ("..." if streaming else ""))
+                if len(body) > MAX_CARD_CONTENT_LENGTH:
+                    # Truncate for card, but full content will be sent as plain text later
+                    logger.warning(
+                        f"[Feishu] Card content truncated from {len(answer_text)} to {MAX_CARD_CONTENT_LENGTH} chars, full text will follow"
+                    )
+                    body = body[:MAX_CARD_CONTENT_LENGTH] + "\n\n...(内容过长，完整内容见下方纯文本消息)"
                 elements.append({"tag": "markdown", "content": body or "..."})
                 return {
                     "config": {"update_multi": True},
@@ -874,35 +888,6 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                         "title": {"content": _name, "tag": "plain_text"},
                     },
                     "elements": elements,
-                }
-
-            def _build_final_cardkit_card(answer_text: str, thinking_text: str = "") -> dict:
-                elements = []
-                if thinking_text:
-                    elements.append(
-                        {
-                            "tag": "collapsible_panel",
-                            "expanded": False,
-                            "header": {
-                                "title": {"tag": "markdown", "content": f"💭 Thinking... ({len(thinking_text)} chars)"},
-                                "vertical_align": "center",
-                                "icon": {
-                                    "tag": "standard_icon",
-                                    "token": "down-small-ccm_outlined",
-                                    "size": "16px 16px",
-                                },
-                                "icon_position": "follow_text",
-                                "icon_expanded_angle": -180,
-                            },
-                            "border": {"color": "grey", "corner_radius": "5px"},
-                            "elements": [{"tag": "markdown", "content": thinking_text, "text_size": "notation"}],
-                        }
-                    )
-                elements.append({"tag": "markdown", "content": answer_text or "..."})
-                return {
-                    "schema": "2.0",
-                    "config": {"wide_screen_mode": True, "update_multi": True},
-                    "body": {"elements": elements},
                 }
 
             async def _queue_patch_card(card: dict, stage: str) -> None:
@@ -917,7 +902,6 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                             config.app_secret,
                             msg_id_for_patch,
                             payload,
-                            stage=stage,
                         )
                     except Exception as e:
                         logger.warning(f"[Feishu] Patch failed (stage={stage}, message_id={msg_id_for_patch}): {e}")
@@ -925,70 +909,40 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 _patch_queue.enqueue(_job)
 
             async def _flush_stream(reason: str, force: bool = False):
-                nonlocal _last_flush_time, _last_flushed_hash, cardkit_sequence, _last_flushed_text
-                if not cardkit_card_id and not msg_id_for_patch:
+                nonlocal _last_flush_time, _last_flushed_hash
+                if not msg_id_for_patch:
                     return
-                async with _flush_lock:
-                    logger.debug(f"[Feishu] flush({reason}): seq={cardkit_sequence}")
-                    now = time.time()
-                    flush_interval = _FLUSH_INTERVAL_CARDKIT if cardkit_card_id else _FLUSH_INTERVAL_PATCH
-                    if not force and now - _last_flush_time < flush_interval:
-                        return
-                    accumulated = "".join(_stream_buffer)
-                    if cardkit_card_id:
-                        # Build composite content: tool status lines + answer text.
-                        # This mirrors the IM Patch path where _build_card() includes the
-                        # tool status section, so CardKit users also see which tools are
-                        # running or completed during the LLM turn.
-                        done_visible = _tool_status_done[-_TOOL_STATUS_KEEP_LINES:]
-                        running_visible = list(_tool_status_running.values())
-                        all_tool_lines = done_visible + running_visible
-                        if all_tool_lines:
-                            tool_section = "\n".join(all_tool_lines)
-                            cardkit_text = f"{tool_section}\n---\n{accumulated}" if accumulated else tool_section
-                        else:
-                            cardkit_text = accumulated
-                        if cardkit_text != _last_flushed_text:
-                            cardkit_sequence += 1
-                            try:
-                                await asyncio.wait_for(
-                                    feishu_service.stream_card_content(
-                                        config.app_id,
-                                        config.app_secret,
-                                        cardkit_card_id,
-                                        "streaming_content",
-                                        cardkit_text,
-                                        cardkit_sequence,
-                                    ),
-                                    timeout=5.0,
-                                )
-                                _last_flushed_text = cardkit_text
-                            except asyncio.TimeoutError:
-                                logger.warning(f"[Feishu] CardKit stream timed out, seq={cardkit_sequence}")
-                            except Exception as e:
-                                logger.warning(f"[Feishu] CardKit stream failed: {e}")
-                    elif msg_id_for_patch:
-                        card = _build_card(accumulated, "".join(_thinking_buffer), streaming=True)
-                        current_hash = hash(
-                            accumulated
-                            + "".join(_thinking_buffer)
-                            + str(_tool_status_done)
-                            + str(list(_tool_status_running.values()))
-                        )
-                        if reason == "heartbeat" and current_hash == _last_flushed_hash:
-                            return
-                        _last_flushed_hash = current_hash
-                        await _queue_patch_card(card, stage=f"stream_{reason}")
-                    _last_flush_time = now
+                now = time.time()
+                if not force and now - _last_flush_time < _FLUSH_INTERVAL:
+                    return
+                card = _build_card(
+                    "".join(_stream_buffer),
+                    "".join(_thinking_buffer),
+                    streaming=True,
+                )
+                # Skip patch when content has not changed since the last flush
+                # (common during heartbeat ticks when LLM is waiting for tool results).
+                current_hash = hash(
+                    "".join(_stream_buffer)
+                    + "".join(_thinking_buffer)
+                    + str(_tool_status_done)
+                    + str(list(_tool_status_running.values()))
+                )
+                if reason == "heartbeat" and current_hash == _last_flushed_hash:
+                    return
+                _last_flushed_hash = current_hash
+                await _queue_patch_card(card, stage=f"stream_{reason}")
+                _last_flush_time = now
 
             async def _ws_on_chunk(text: str):
-                if not cardkit_card_id and not msg_id_for_patch:
+                if not msg_id_for_patch:
                     return
                 _stream_buffer.append(text)
+                logger.debug(f"[Feishu] on_chunk: len={len(text)}, total_buffer={len(_stream_buffer)}")
                 await _flush_stream("chunk")
 
             async def _ws_on_thinking(text: str):
-                if not cardkit_card_id and not msg_id_for_patch:
+                if not msg_id_for_patch:
                     return
                 _thinking_buffer.append(text)
                 await _flush_stream("thinking")
@@ -1019,13 +973,14 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
 
             async def _heartbeat():
                 while not _llm_done:
-                    await asyncio.sleep(_FLUSH_INTERVAL_CARDKIT if cardkit_card_id else _FLUSH_INTERVAL_PATCH)
+                    await asyncio.sleep(_FLUSH_INTERVAL)
                     await _flush_stream("heartbeat")
 
-            if cardkit_card_id or msg_id_for_patch:
+            if msg_id_for_patch:
                 _heartbeat_task = asyncio.create_task(_heartbeat())
 
             # Call LLM with history and streaming callback
+            logger.info(f"[Feishu] Starting LLM call for agent {agent_id}")
             try:
                 reply_text = await _call_agent_llm(
                     db,
@@ -1037,101 +992,137 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     on_thinking=_ws_on_thinking,
                     on_tool_call=_ws_on_tool_call,
                 )
+                logger.info(f"[Feishu] LLM call returned, reply_text len={len(reply_text) if reply_text else 0}")
+            except Exception as e:
+                logger.error(f"[Feishu] LLM call failed: {e}")
+                import traceback
+
+                traceback.print_exc()
+                reply_text = f"⚠️ LLM 调用失败: {str(e)[:100]}"
             finally:
                 _llm_done = True
+                logger.info(f"[Feishu] LLM done, stream_buffer len={len(_stream_buffer)}")
                 if _heartbeat_task:
                     _heartbeat_task.cancel()
                     try:
                         await _heartbeat_task
-                    except (Exception, asyncio.CancelledError):
+                    except Exception:
                         pass
                 _cfs.reset(_cfs_token)
                 _cfso.reset(_cfso_token)
-            logger.info(f"[Feishu] LLM reply: {reply_text[:100]}")
+
+            # Use reply_text directly as the final content
+            # The _stream_buffer may be incomplete for some providers (e.g., MiniMax)
+            # that don't stream content after tool calls.
+            # reply_text contains the full accumulated content from all LLM rounds.
+            final_reply_text = reply_text.strip() if reply_text else ""
+
+            logger.info(
+                f"[Feishu] LLM done, reply_text len={len(final_reply_text)}, stream_buffer len={len(_stream_buffer)}"
+            )
+            logger.info(
+                f"[Feishu] Final reply text preview: {final_reply_text[:200] if final_reply_text else '(empty)'}"
+            )
+
+            # Mark task as completed
+            _sess.last_task_status = "completed"
+            _sess.last_task_completed_at = _dt.now(_tz.utc)
+            await db.commit()
 
             # Send final card update or fallback text
-            if cardkit_card_id:
-                try:
-                    cardkit_sequence += 1
-                    await asyncio.wait_for(
-                        feishu_service.set_card_streaming_mode(
-                            config.app_id,
-                            config.app_secret,
-                            cardkit_card_id,
-                            0,
-                            cardkit_sequence,
-                        ),
-                        timeout=10.0,
-                    )
-                    cardkit_sequence += 1
-                    final_card = _build_final_cardkit_card(reply_text, "".join(_thinking_buffer))
-                    await asyncio.wait_for(
-                        feishu_service.update_cardkit_card(
-                            config.app_id,
-                            config.app_secret,
-                            cardkit_card_id,
-                            final_card,
-                            cardkit_sequence,
-                        ),
-                        timeout=10.0,
-                    )
-                except Exception as e:
-                    logger.error(f"[Feishu] CardKit final update failed: {e}")
-                    try:
-                        await feishu_service.send_message(
-                            config.app_id,
-                            config.app_secret,
-                            _reply_target,
-                            "text",
-                            _json.dumps({"text": reply_text}),
-                            receive_id_type=_rid_type,
-                            stage="stream_final_fallback_text",
-                        )
-                    except Exception as e2:
-                        logger.error(f"[Feishu] CardKit fallback text also failed: {e2}")
-            elif msg_id_for_patch:
+            # Check if content was truncated (exceeds 28000 chars)
+            _content_truncated = len(final_reply_text) > 28000
+
+            if msg_id_for_patch:
                 try:
                     await _patch_queue.drain()
                 except Exception as e:
                     logger.warning(f"[Feishu] Drain patch queue failed before final patch: {e}")
                 final_card = _build_card(
-                    reply_text,
+                    final_reply_text,
                     "".join(_thinking_buffer),
                     streaming=False,
                 )
+                logger.info(f"[Feishu] Final card built, content preview: {str(final_card)[:500]}")
                 try:
+                    card_payload = _json_card.dumps(final_card)
+                    logger.info(f"[Feishu] Card payload length: {len(card_payload)}")
                     await feishu_service.patch_message(
                         config.app_id,
                         config.app_secret,
                         msg_id_for_patch,
-                        _json_card.dumps(final_card),
+                        card_payload,
                         stage="stream_final",
                     )
+
+                    # If card was truncated, send full text as separate message
+                    if _content_truncated:
+                        logger.info(f"[Feishu] Sending full text ({len(final_reply_text)} chars) after truncated card")
+                        try:
+                            if chat_type == "group" and chat_id:
+                                await feishu_service.send_message(
+                                    config.app_id,
+                                    config.app_secret,
+                                    chat_id,
+                                    "text",
+                                    _json.dumps({"text": final_reply_text}),
+                                    receive_id_type="chat_id",
+                                    stage="full_text_after_card",
+                                )
+                            else:
+                                await feishu_service.send_message(
+                                    config.app_id,
+                                    config.app_secret,
+                                    sender_open_id,
+                                    "text",
+                                    _json.dumps({"text": final_reply_text}),
+                                    stage="full_text_after_card",
+                                )
+                        except Exception as _full_err:
+                            logger.error(f"[Feishu] Failed to send full text: {_full_err}")
                 except Exception as e:
                     logger.error(f"[Feishu] Final card patch failed: {e}")
-                    try:
+                    if chat_type == "group" and chat_id:
                         await feishu_service.send_message(
                             config.app_id,
                             config.app_secret,
-                            _reply_target,
+                            chat_id,
                             "text",
-                            _json.dumps({"text": reply_text}),
-                            receive_id_type=_rid_type,
+                            _json.dumps({"text": final_reply_text}),
+                            receive_id_type="chat_id",
                             stage="stream_final_fallback_text",
                         )
-                    except Exception as e2:
-                        logger.error(f"[Feishu] Fallback text also failed: {e2}")
+                    else:
+                        await feishu_service.send_message(
+                            config.app_id,
+                            config.app_secret,
+                            sender_open_id,
+                            "text",
+                            _json.dumps({"text": final_reply_text}),
+                            stage="stream_final_fallback_text",
+                        )
             else:
+                # Fallback to plain text if card creation failed
                 try:
-                    await feishu_service.send_message(
-                        config.app_id,
-                        config.app_secret,
-                        _reply_target,
-                        "text",
-                        _json.dumps({"text": reply_text}),
-                        receive_id_type=_rid_type,
-                        stage="stream_no_card_fallback_text",
-                    )
+                    if chat_type == "group" and chat_id:
+                        await feishu_service.send_message(
+                            config.app_id,
+                            config.app_secret,
+                            chat_id,
+                            "text",
+                            _json.dumps({"text": final_reply_text}),
+                            receive_id_type="chat_id",
+                            stage="stream_no_card_fallback_text",
+                        )
+                    else:
+                        await feishu_service.send_message(
+                            config.app_id,
+                            config.app_secret,
+                            sender_open_id,
+                            "text",
+                            _json.dumps({"text": final_reply_text}),
+                            stage="stream_no_card_fallback_text",
+                        )
                 except Exception as e:
                     logger.error(f"[Feishu] Failed to send fallback message: {e}")
 
@@ -1141,8 +1132,8 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             await log_activity(
                 agent_id,
                 "chat_reply",
-                f"回复了飞书消息: {reply_text[:80]}",
-                detail={"channel": "feishu", "user_text": user_text[:200], "reply": reply_text[:500]},
+                f"回复了飞书消息: {final_reply_text[:80]}",
+                detail={"channel": "feishu", "user_text": user_text[:200], "reply": final_reply_text[:500]},
             )
 
             # If task creation detected, create a real Task record
@@ -1171,7 +1162,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                         await db.commit()
                         await db.refresh(task_obj)
                         _asyncio.create_task(execute_task(task_obj.id, agent_id))
-                        reply_text += f"\n\n📋 已同步创建任务到任务面板：【{task_title}】"
+                        final_reply_text += f"\n\n📋 已同步创建任务到任务面板：【{task_title}】"
                         logger.info(f"[Feishu] Created task: {task_title}")
                     except Exception as e:
                         logger.error(f"[Feishu] Failed to create task: {e}")
@@ -1182,7 +1173,7 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     agent_id=agent_id,
                     user_id=platform_user_id,
                     role="assistant",
-                    content=reply_text,
+                    content=final_reply_text,
                     conversation_id=session_conv_id,
                 )
             )
@@ -1221,19 +1212,11 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
     message_id = message.get("message_id", "")
     content = json.loads(message.get("content", "{}"))
 
-    # Normalize voice to audio
-    if msg_type == "voice":
-        msg_type = "audio"
-
     # Extract file key and name
     if msg_type == "image":
         file_key = content.get("image_key", "")
         filename = f"image_{file_key[-8:]}.jpg" if file_key else "image.jpg"
         res_type = "image"
-    elif msg_type == "audio":
-        file_key = content.get("file_key", "")
-        filename = f"voice_{file_key[-8:]}.opus" if file_key else "voice.opus"
-        res_type = "file"
     else:
         file_key = content.get("file_key", "")
         filename = content.get("file_name") or f"file_{file_key[-8:]}.bin"
@@ -1403,240 +1386,6 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
 
         await db.commit()
 
-    # For audio: ASR → text → LLM → TTS response (if enabled)
-    if msg_type == "audio":
-        import json as _json_audio
-        import time
-
-        # Get Agent and LLM model to check Tencent credentials
-        async with _async_session() as db:
-            agent_r = await db.execute(_select(AgentModel).where(AgentModel.id == agent_id))
-            agent_obj = agent_r.scalar_one_or_none()
-
-            # Check if voice is enabled
-            if not agent_obj or not getattr(agent_obj, "voice_enabled", False):
-                _reply_to = chat_id if chat_type == "group" else sender_open_id
-                _rid_type = "chat_id" if chat_type == "group" else "open_id"
-                await feishu_service.send_message(
-                    config.app_id,
-                    config.app_secret,
-                    _reply_to,
-                    "text",
-                    _json_audio.dumps({"text": "收到语音消息，但该 Agent 未启用语音回复功能。"}),
-                    receive_id_type=_rid_type,
-                )
-                return
-
-            # Get Tencent Voice credentials from tenant settings
-            from app.models.tenant_settings import TenantSetting
-
-            tencent_settings_r = await db.execute(
-                _select(TenantSetting).where(
-                    TenantSetting.tenant_id == agent_obj.tenant_id, TenantSetting.key == "tencent_voice_key"
-                )
-            )
-            tencent_settings = tencent_settings_r.scalar_one_or_none()
-
-            if not tencent_settings or not tencent_settings.value:
-                logger.error(f"[Feishu Audio] Tencent Voice key not configured")
-                _reply_to = chat_id if chat_type == "group" else sender_open_id
-                _rid_type = "chat_id" if chat_type == "group" else "open_id"
-                await feishu_service.send_message(
-                    config.app_id,
-                    config.app_secret,
-                    _reply_to,
-                    "text",
-                    _json_audio.dumps({"text": "语音功能未配置，请联系管理员配置腾讯云密钥。"}),
-                    receive_id_type=_rid_type,
-                )
-                return
-
-            tencent_secret_id = tencent_settings.value.get("secret_id")
-            tencent_secret_key = tencent_settings.value.get("secret_key")
-
-            if not tencent_secret_id or not tencent_secret_key:
-                logger.error(f"[Feishu Audio] Tencent Voice key incomplete")
-                return
-
-            # Initialize Tencent Voice Service
-            from app.services.tencent_voice import TencentVoiceService
-
-            tencent_voice = TencentVoiceService(tencent_secret_id, tencent_secret_key)
-
-            # Convert opus to mp3 using ffmpeg (Tencent ASR doesn't support opus)
-            import subprocess
-            import tempfile
-            import os
-
-            with tempfile.NamedTemporaryFile(suffix=".opus", delete=False) as opus_file:
-                opus_file.write(file_bytes)
-                opus_path = opus_file.name
-
-            mp3_path = opus_path.replace(".opus", ".mp3")
-
-            try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", opus_path, "-ar", "16000", "-ac", "1", mp3_path],
-                    check=True,
-                    capture_output=True,
-                )
-                with open(mp3_path, "rb") as f:
-                    mp3_bytes = f.read()
-            except subprocess.CalledProcessError as e:
-                logger.error(f"[Feishu Audio] ffmpeg failed: {e.stderr.decode()}")
-                mp3_bytes = file_bytes
-            finally:
-                os.unlink(opus_path)
-                if os.path.exists(mp3_path):
-                    os.unlink(mp3_path)
-
-            # ASR: convert audio to text
-            try:
-                transcript = await tencent_voice.asr_one_sentence(mp3_bytes, format="mp3")
-                logger.info(f"[Feishu Audio] ASR result: {transcript[:100]}")
-            except Exception as e:
-                logger.error(f"[Feishu Audio] ASR failed: {e}")
-                _reply_to = chat_id if chat_type == "group" else sender_open_id
-                _rid_type = "chat_id" if chat_type == "group" else "open_id"
-                await feishu_service.send_message(
-                    config.app_id,
-                    config.app_secret,
-                    _reply_to,
-                    "text",
-                    _json_audio.dumps({"text": f"语音识别失败: {str(e)}"}),
-                    receive_id_type=_rid_type,
-                )
-                return
-
-            # Save transcript as user message
-            db.add(
-                ChatMessage(
-                    agent_id=agent_id,
-                    user_id=platform_user_id,
-                    role="user",
-                    content=f"[语音] {transcript}",
-                    conversation_id=session_conv_id,
-                )
-            )
-            await db.commit()
-
-            # Get voice settings
-            voice_type = getattr(agent_obj, "voice_type", "101001") or "101001"
-            voice_speed = getattr(agent_obj, "voice_speed", 0.0) or 0.0
-            voice_volume = getattr(agent_obj, "voice_volume", 0.0) or 0.0
-
-            # Extract voice_id (format: "tencent:101001" or just "101001")
-            if ":" in str(voice_type):
-                voice_type = voice_type.split(":")[-1]
-
-        # Call LLM
-        from app.api.websocket import call_llm
-        from app.models.llm import LLMModel
-
-        async with _async_session() as db:
-            model_r = await db.execute(_select(LLMModel).where(LLMModel.id == agent_obj.primary_model_id))
-            model = model_r.scalar_one_or_none()
-
-            if not model:
-                return
-
-            # Load history
-            _hist_r = await db.execute(
-                _select(ChatMessage)
-                .where(ChatMessage.agent_id == agent_id, ChatMessage.conversation_id == session_conv_id)
-                .order_by(ChatMessage.created_at.desc())
-                .limit(ctx_size)
-            )
-            history = [{"role": m.role, "content": m.content} for m in reversed(_hist_r.scalars().all())]
-
-            # Add voice context
-            voice_context = (
-                "[语音对话模式] 用户向你发送了语音消息。"
-                "系统会自动把你的文字回复转换成语音发送给用户。"
-                "所以你应该用自然、口语化的方式回复，就像在打电话一样。"
-                "回复要简洁，不要使用表格、代码块等复杂格式。"
-            )
-            enhanced_role_description = (agent_obj.role_description or "") + "\n\n" + voice_context
-
-            reply_text = await call_llm(
-                model=model,
-                messages=history,
-                agent_name=agent_obj.name or "Agent",
-                role_description=enhanced_role_description,
-                agent_id=agent_id,
-                user_id=platform_user_id,
-                session_id=session_conv_id,
-            )
-            logger.info(f"[Feishu Audio] LLM reply: {reply_text[:200]}...")
-
-            # Save assistant message
-            db.add(
-                ChatMessage(
-                    agent_id=agent_id,
-                    user_id=platform_user_id,
-                    role="assistant",
-                    content=reply_text,
-                    conversation_id=session_conv_id,
-                )
-            )
-            await db.commit()
-
-        # Generate voice reply
-        try:
-            audio_bytes = await tencent_voice.tts_synthesis(
-                text=reply_text, voice_type=voice_type, speed=voice_speed, volume=voice_volume, codec="wav"
-            )
-
-            # Convert wav to opus (Feishu requires opus for audio messages)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_file:
-                wav_file.write(audio_bytes)
-                wav_path = wav_file.name
-
-            opus_path = wav_path.replace(".wav", ".opus")
-
-            try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "64k", opus_path],
-                    check=True,
-                    capture_output=True,
-                )
-                with open(opus_path, "rb") as f:
-                    opus_bytes = f.read()
-                logger.info(f"[Feishu Audio] Converted to opus: {len(opus_bytes)} bytes")
-            except subprocess.CalledProcessError as e:
-                logger.error(f"[Feishu Audio] ffmpeg opus conversion failed: {e.stderr.decode()}")
-                opus_bytes = audio_bytes
-            finally:
-                os.unlink(wav_path)
-                if os.path.exists(opus_path):
-                    os.unlink(opus_path)
-
-            # Upload and send audio
-            file_key = await feishu_service.upload_audio(
-                config.app_id, config.app_secret, opus_bytes, file_name=f"reply_{int(time.time())}.opus"
-            )
-            _reply_to = chat_id if chat_type == "group" else sender_open_id
-            _rid_type = "chat_id" if chat_type == "group" else "open_id"
-            await feishu_service.send_audio_message(
-                config.app_id, config.app_secret, _reply_to, file_key, receive_id_type=_rid_type
-            )
-            logger.info(f"[Feishu Audio] Voice reply sent: {len(audio_bytes)} bytes")
-
-        except Exception as e:
-            logger.error(f"[Feishu Audio] TTS failed: {e}")
-            _reply_to = chat_id if chat_type == "group" else sender_open_id
-            _rid_type = "chat_id" if chat_type == "group" else "open_id"
-            await feishu_service.send_message(
-                config.app_id,
-                config.app_secret,
-                _reply_to,
-                "text",
-                _json_audio.dumps({"text": reply_text}),
-                receive_id_type=_rid_type,
-            )
-
-        return
-
     # For images: call LLM so vision models can actually see the image
     if msg_type == "image":
         import json as _json_card_img
@@ -1755,7 +1504,14 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                     except Exception:
                         pass
 
-        logger.info(f"[Feishu] Image LLM reply: {reply_text[:100]}")
+        logger.info(f"[Feishu] Image LLM reply (returned): {reply_text[:100]}")
+
+        # Use accumulated stream buffer as the final reply text
+        # This ensures we have the complete text even when LLM returns empty response.content
+        accumulated_text = "".join(_img_stream_buf).strip()
+        final_reply_text = reply_text.strip() if reply_text else ""
+
+        logger.info(f"[Feishu] Image LLM reply (accumulated): {accumulated_text[:100]}")
 
         # Send final card or fallback text
         if _patch_msg_id:
@@ -1765,7 +1521,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                 logger.warning(f"[Feishu] Image patch queue drain failed: {_e_drain}")
             # Build final card via shared builder (consistent with text streaming path).
             _final_card = _build_card(
-                reply_text or "...",
+                final_reply_text or "...",
                 streaming=False,
                 agent_name=_agent_name,
             )
@@ -1783,7 +1539,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                     config.app_secret,
                     _reply_to,
                     "text",
-                    json.dumps({"text": reply_text}),
+                    json.dumps({"text": final_reply_text}),
                     receive_id_type=_rid_type,
                     stage="image_stream_fallback_text",
                 )
@@ -1797,7 +1553,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
                     agent_id=agent_id,
                     user_id=platform_user_id,
                     role="assistant",
-                    content=reply_text,
+                    content=final_reply_text,
                     conversation_id=session_conv_id,
                 )
             )
@@ -1809,7 +1565,7 @@ async def _handle_feishu_file(db, agent_id, config, message, sender_open_id, cha
         await log_activity(
             agent_id,
             "chat_reply",
-            f"回复了飞书图片消息: {reply_text[:80]}",
+            f"回复了飞书图片消息: {final_reply_text[:80]}",
             detail={"channel": "feishu", "type": "image"},
         )
         return

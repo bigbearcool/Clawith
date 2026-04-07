@@ -5356,7 +5356,7 @@ function AgentDetailInner() {
                                             <h4 style={{ marginBottom: '4px' }}>🔊 {isChinese ? '语音设置' : 'Voice Settings'}</h4>
                                             <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
                                                 {isChinese
-                                                    ? '启用后，用户发送语音消息时 Agent 会用语音回复（需在企业设置→模型池配置腾讯云密钥）'
+                                                    ? '启用后，用户发送语音消息时 Agent 会用语音回复（需在企业设置→公司配置中配置腾讯云密钥）'
                                                     : 'When enabled, Agent will reply with voice (configure Tencent Cloud key in Enterprise Settings → Model Pool)'}
                                             </p>
                                             <div style={{ marginBottom: '12px' }}>

@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from pydantic import BaseModel
-from sqlalchemy import select, func, update
+from sqlalchemy import delete, select, func, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -606,6 +606,7 @@ async def update_email_templates_endpoint(
 # ─── System Settings ───────────────────────────────────
 
 from app.models.system_settings import SystemSetting
+from app.models.tenant_settings import TenantSetting
 
 
 class SettingUpdate(BaseModel):
@@ -1342,6 +1343,103 @@ async def trigger_org_sync(
         raise HTTPException(status_code=403, detail="Cannot sync other tenant's provider")
 
     return await org_sync_service.sync_provider(db, provider_id)
+
+
+# ─── Tenant-Level Settings ────────────────────────────────
+
+
+@router.get("/tenant-settings/{key}")
+async def get_tenant_setting(
+    key: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get tenant-level setting."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="User not in a tenant")
+
+    result = await db.execute(
+        select(TenantSetting).where(TenantSetting.tenant_id == current_user.tenant_id, TenantSetting.key == key)
+    )
+    setting = result.scalar_one_or_none()
+
+    if not setting:
+        return {}
+
+    # For sensitive data (like API keys), return masked version
+    if key == "tencent_voice_key" and setting.value:
+        return {
+            "secret_id": setting.value.get("secret_id", "")[:10] + "..." if setting.value.get("secret_id") else "",
+            "secret_key": setting.value.get("secret_key", "")[:10] + "..." if setting.value.get("secret_key") else "",
+            "_configured": True,
+        }
+
+    return setting.value
+
+
+@router.post("/tenant-settings/{key}")
+async def set_tenant_setting(
+    key: str,
+    value: dict,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set tenant-level setting (requires org_admin or platform_admin)."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="User not in a tenant")
+
+    # Check permission: org_admin or platform_admin
+    if current_user.role not in ("org_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="Only org admin can set tenant settings")
+
+    # Find existing setting
+    result = await db.execute(
+        select(TenantSetting).where(TenantSetting.tenant_id == current_user.tenant_id, TenantSetting.key == key)
+    )
+    setting = result.scalar_one_or_none()
+
+    if setting:
+        # Update existing setting
+        # If frontend sent masked values (containing ...), preserve original values
+        if key == "tencent_voice_key":
+            existing_value = setting.value
+            new_secret_id = value.get("secret_id", "")
+            new_secret_key = value.get("secret_key", "")
+
+            # If masked value sent, keep the original
+            if "..." in new_secret_id and existing_value.get("secret_id"):
+                value["secret_id"] = existing_value["secret_id"]
+            if "..." in new_secret_key and existing_value.get("secret_key"):
+                value["secret_key"] = existing_value["secret_key"]
+
+        setting.value = value
+    else:
+        # Create new setting
+        setting = TenantSetting(tenant_id=current_user.tenant_id, key=key, value=value)
+        db.add(setting)
+
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/tenant-settings/{key}")
+async def delete_tenant_setting(
+    key: str,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete tenant-level setting."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="User not in a tenant")
+
+    if current_user.role not in ("org_admin", "platform_admin"):
+        raise HTTPException(status_code=403, detail="Only org admin can delete tenant settings")
+
+    await db.execute(
+        delete(TenantSetting).where(TenantSetting.tenant_id == current_user.tenant_id, TenantSetting.key == key)
+    )
+    await db.commit()
+    return {"success": True}
 
 
 @router.get("/org/wecom-verify/{provider_id}")

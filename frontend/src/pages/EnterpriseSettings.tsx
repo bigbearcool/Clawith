@@ -1926,13 +1926,13 @@ export default function EnterpriseSettings() {
     useEffect(() => {
         if (activeTab !== 'llm') return;
         const token = localStorage.getItem('token');
-        fetch('/api/enterprise/system-settings/tencent_voice_key', { headers: { Authorization: `Bearer ${token}` } })
+        fetch('/api/enterprise/tenant-settings/tencent_voice_key', { headers: { Authorization: `Bearer ${token}` } })
             .then(r => r.json())
             .then(d => {
-                if (d.value?.secret_id && d.value?.secret_key) {
+                if (d.secret_id && d.secret_key) {
                     setTencentVoiceMasked({
-                        id: d.value.secret_id.slice(0, 4) + '****',
-                        key: d.value.secret_key.slice(0, 4) + '****'
+                        id: d.secret_id.slice(0, 4) + '****',
+                        key: d.secret_key.slice(0, 4) + '****'
                     });
                 }
             })
@@ -1942,14 +1942,12 @@ export default function EnterpriseSettings() {
     const saveTencentVoiceKey = async () => {
         setTencentVoiceSaving(true);
         const token = localStorage.getItem('token');
-        await fetch('/api/enterprise/system-settings/tencent_voice_key', {
-            method: 'PUT',
+        await fetch('/api/enterprise/tenant-settings/tencent_voice_key', {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({
-                value: {
-                    secret_id: tencentVoiceForm.secret_id,
-                    secret_key: tencentVoiceForm.secret_key
-                }
+                secret_id: tencentVoiceForm.secret_id,
+                secret_key: tencentVoiceForm.secret_key
             }),
         });
         setTencentVoiceMasked({
@@ -1962,10 +1960,9 @@ export default function EnterpriseSettings() {
     
     const clearTencentVoiceKey = async () => {
         const token = localStorage.getItem('token');
-        await fetch('/api/enterprise/system-settings/tencent_voice_key', {
-            method: 'PUT',
+        await fetch('/api/enterprise/tenant-settings/tencent_voice_key', {
+            method: 'DELETE',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ value: {} }),
         });
         setTencentVoiceMasked(null);
         setTencentVoiceForm({ secret_id: '', secret_key: '' });
@@ -2089,7 +2086,7 @@ export default function EnterpriseSettings() {
                         <div className="card" style={{ marginBottom: '16px', background: 'linear-gradient(135deg, rgba(34,197,94,0.05) 0%, rgba(34,197,94,0.02) 100%)' }}>
                             <h4 style={{ marginBottom: '12px' }}>🔊 腾讯云语音服务</h4>
                             <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
-                                配置腾讯云密钥后，所有 Agent 都可以使用语音功能。在 Agent 设置中启用语音回复即可。
+                                配置腾讯云密钥后，本公司所有 Agent 都可以使用语音功能。在 Agent 设置中启用语音回复即可。
                             </p>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                 <div className="form-group">
