@@ -289,6 +289,7 @@ class BaseOrgSyncAdapter(ABC):
                 update(OrgDepartment)
                 .where(OrgDepartment.id == bindparam("b_id"))
                 .values(member_count=bindparam("b_count"))
+                .execution_options(synchronize_session=None)
             )
             # Re-map keys for bindparams
             bind_mappings = [{"b_id": m["id"], "b_count": m["member_count"]} for m in update_mappings]
