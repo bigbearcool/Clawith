@@ -817,14 +817,14 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                 await db.flush()
                 await self._reconcile(db, provider.id, sync_start)
                 await db.flush()
-await self._update_member_counts(db, provider.id)
-            await db.flush()
+                await self._update_member_counts(db, provider.id)
+                await db.flush()
 
         except Exception as e:
             import traceback
 
             logger.error(f"[OrgSync] Critical error during sync: {e}\n{traceback.format_exc()}")
-            
+
             # Provide user-friendly error message
             error_msg = str(e)
             if "ConnectTimeout" in error_msg or "timeout" in error_msg.lower():
