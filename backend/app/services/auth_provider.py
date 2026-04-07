@@ -231,12 +231,17 @@ class BaseAuthProvider(ABC):
 
         email = user_info.email or f"{username}@{self.provider_type}.local"
 
+        # Convert empty strings to None to avoid unique constraint violations
+        phone = user_info.mobile or None
+        if phone == "":
+            phone = None
+
         # Create Identity first
         identity = Identity(
             email=email,
             username=username,
             password_hash=hash_password(user_info.provider_user_id),
-            phone=user_info.mobile,
+            phone=phone,
             email_verified=bool(user_info.email),
             is_active=True,
         )
