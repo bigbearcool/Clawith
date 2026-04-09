@@ -416,8 +416,10 @@ async def resolve_tenant_by_domain(
                 result = await db.execute(select(Tenant).where(Tenant.slug == potential_slug))
                 tenant = result.scalar_one_or_none()
 
-    if not tenant or not tenant.is_active or not tenant.sso_enabled:
-        raise HTTPException(status_code=404, detail="Tenant not found or not active or SSO not enabled")
+    # No fallback - only show SSO for explicitly matched tenant domains
+    # Platform-level access (no matching tenant) should not show any SSO
+    if not tenant or not tenant.is_active:
+        raise HTTPException(status_code=404, detail="No active tenant found")
 
     return {
         "id": tenant.id,
