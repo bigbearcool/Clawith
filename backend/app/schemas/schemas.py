@@ -164,6 +164,7 @@ class UserOut(BaseModel):
     registration_source: str | None = None
     is_active: bool
     email_verified: bool = True
+    has_password: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}

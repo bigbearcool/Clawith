@@ -166,20 +166,26 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
     };
 
     const handleChangePassword = async () => {
-        if (!oldPassword || !newPassword) { showMsg(isChinese ? '请填写所有密码字段' : 'Fill all password fields', 'error'); return; }
+        if (user?.has_password && !oldPassword) { showMsg(isChinese ? '请输入当前密码' : 'Enter current password', 'error'); return; }
+        if (!newPassword) { showMsg(isChinese ? '请输入新密码' : 'Enter new password', 'error'); return; }
         if (newPassword.length < 6) { showMsg(isChinese ? '新密码至少 6 个字符' : 'Min 6 characters', 'error'); return; }
         if (newPassword !== confirmPassword) { showMsg(isChinese ? '两次密码不一致' : 'Passwords do not match', 'error'); return; }
         setSaving(true);
         try {
             const token = localStorage.getItem('token');
+            const body: any = { new_password: newPassword };
+            if (user?.has_password) body.old_password = oldPassword;
             const res = await fetch('/api/auth/me/password', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+                body: JSON.stringify(body),
             });
             if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Failed' })); throw new Error(err.detail); }
-            showMsg(isChinese ? '密码已修改' : 'Password changed');
+            showMsg(user?.has_password ? (isChinese ? '密码已修改' : 'Password changed') : (isChinese ? '密码已设置' : 'Password set'));
             setOldPassword(''); setNewPassword(''); setConfirmPassword('');
+            // Refresh user to update has_password
+            const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+            if (meRes.ok) setUser(await meRes.json());
         } catch (e: any) { showMsg(e.message || 'Failed', 'error'); }
         setSaving(false);
     };
@@ -270,12 +276,16 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
                 )}
                 <div style={{ borderTop: '1px solid var(--border-subtle)', marginBottom: '20px' }} />
                 {/* Password */}
-                <h4 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>{isChinese ? '修改密码' : 'Change Password'}</h4>
+                <h4 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {user?.has_password ? (isChinese ? '修改密码' : 'Change Password') : (isChinese ? '设置密码' : 'Set Password')}
+                </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div><label style={labelStyle}>{isChinese ? '当前密码' : 'Current Password'}</label><input className="form-input" type="password" value={oldPassword} onChange={e => setOldPassword(e.target.value)} style={inputStyle} /></div>
+                    {user?.has_password && (
+                        <div><label style={labelStyle}>{isChinese ? '当前密码' : 'Current Password'}</label><input className="form-input" type="password" value={oldPassword} onChange={e => setOldPassword(e.target.value)} style={inputStyle} /></div>
+                    )}
                     <div><label style={labelStyle}>{isChinese ? '新密码' : 'New Password'}</label><input className="form-input" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={isChinese ? '至少 6 个字符' : 'Min 6 characters'} style={inputStyle} /></div>
                     <div><label style={labelStyle}>{isChinese ? '确认新密码' : 'Confirm New Password'}</label><input className="form-input" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} style={inputStyle} /></div>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button className="btn btn-primary" onClick={handleChangePassword} disabled={saving} style={{ padding: '6px 16px', fontSize: '12px' }}>{saving ? '...' : (isChinese ? '修改密码' : 'Change Password')}</button></div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button className="btn btn-primary" onClick={handleChangePassword} disabled={saving} style={{ padding: '6px 16px', fontSize: '12px' }}>{saving ? '...' : (user?.has_password ? (isChinese ? '修改密码' : 'Change Password') : (isChinese ? '设置密码' : 'Set Password'))}</button></div>
                 </div>
             </div>
         </div>

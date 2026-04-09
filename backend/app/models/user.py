@@ -113,6 +113,11 @@ class User(Base):
     email_verified = association_proxy("identity", "email_verified")
     primary_mobile = association_proxy("identity", "phone")
 
+    @property
+    def has_password(self) -> bool:
+        """Check if user has a password set."""
+        return bool(self.password_hash)
+
     created_agents: Mapped[list["Agent"]] = relationship(back_populates="creator", foreign_keys="Agent.creator_id")
 
 

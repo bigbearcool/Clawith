@@ -232,7 +232,7 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
     )
     identity = identity_result.scalar_one_or_none()
 
-    if not identity or not verify_password(data.password, identity.password_hash):
+    if not identity or not identity.password_hash or not verify_password(data.password, identity.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if not identity.is_active:
@@ -394,22 +394,135 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change current user's password. Requires old_password verification."""
+    """Change current user's password. Requires old_password verification for existing passwords."""
     old_password = data.get("old_password", "")
     new_password = data.get("new_password", "")
 
-    if not old_password or not new_password:
-        raise HTTPException(status_code=400, detail="Both old_password and new_password are required")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="new_password is required")
 
     if len(new_password) < 6:
         raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
 
-    if not verify_password(old_password, current_user.password_hash):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    # Get identity to check password_hash
+    identity_result = await db.execute(select(Identity).where(Identity.id == current_user.identity_id))
+    identity = identity_result.scalar_one_or_none()
+    if not identity:
+        raise HTTPException(status_code=404, detail="Identity not found")
 
-    current_user.password_hash = hash_password(new_password)
-    await db.flush()
+    # If user has existing password, require old_password verification
+    if identity.password_hash:
+        if not old_password:
+            raise HTTPException(status_code=400, detail="old_password is required")
+        if not verify_password(old_password, identity.password_hash):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    identity.password_hash = hash_password(new_password)
+    await db.commit()
     return {"ok": True}
+
+
+# ─── Password Reset ─────────────────────────────────────────────
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send password reset email."""
+    from app.services.email_verification_service import email_verification_service
+    from app.services.system_email_service import send_password_reset_email
+    from app.config import get_settings
+
+    result = await db.execute(select(Identity).where(Identity.email == data.email.lower().strip()))
+    identity = result.scalar_one_or_none()
+
+    # Always return success to prevent email enumeration
+    if not identity or not identity.email:
+        return {"ok": True, "message": "If the email exists, a reset link has been sent"}
+
+    user_result = await db.execute(select(User).where(User.identity_id == identity.id))
+    user = user_result.scalar_one_or_none()
+
+    settings = get_settings()
+    raw_token, expires_at = await email_verification_service.create_email_verification_token(
+        identity.id, identity.email
+    )
+
+    # Build reset URL
+    base_url = settings.PUBLIC_BASE_URL or "http://localhost:3008"
+    reset_url = f"{base_url}/reset-password?token={raw_token}"
+
+    await send_password_reset_email(
+        to=identity.email,
+        display_name=user.display_name if user and user.display_name else identity.email,
+        reset_url=reset_url,
+        expiry_minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
+        db=db,
+    )
+
+    return {"ok": True, "message": "If the email exists, a reset link has been sent"}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset password using token from email."""
+    from app.services.email_verification_service import email_verification_service
+
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    token_data = await email_verification_service.consume_email_verification_token(data.token)
+    if not token_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    result = await db.execute(select(Identity).where(Identity.id == token_data["identity_id"]))
+    identity = result.scalar_one_or_none()
+    if not identity:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    identity.password_hash = hash_password(data.new_password)
+    await db.commit()
+
+    return {"ok": True, "message": "Password reset successfully"}
+
+
+@router.get("/email-hint")
+async def get_email_hint(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get email hint for a username (shows first 2 and last 2 chars)."""
+    result = await db.execute(select(Identity).where(Identity.username == username.lower().strip()))
+    identity = result.scalar_one_or_none()
+
+    if not identity or not identity.email:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    email = identity.email
+    if "@" in email:
+        local, domain = email.split("@", 1)
+        if len(local) > 4:
+            hint = f"{local[:2]}***{local[-2:]}@{domain}"
+        else:
+            hint = f"{local[0]}***@{domain}"
+    else:
+        hint = f"{email[:2]}***"
+
+    return {"hint": hint}
 
 
 # ─── Email Verification ─────────────────────────────────────────────
