@@ -334,9 +334,6 @@ async def update_me(
     # Update Identity fields
     if "username" in update_data:
         identity.username = update_data["username"]
-    if "email" in update_data:
-        identity.email = update_data["email"]
-        identity.email_verified = False  # Reset verification status when email changes
     if "primary_mobile" in update_data:
         identity.phone = update_data["primary_mobile"]
 
@@ -346,34 +343,49 @@ async def update_me(
         if field in update_data:
             setattr(current_user, field, update_data[field])
 
+    # Handle email change: send verification first, don't update until verified
+    verification_sent = False
+    if "email" in update_data:
+        new_email = update_data["email"].lower().strip()
+        if new_email != identity.email:
+            # Check if new email is already used by another identity
+            existing = await db.execute(select(Identity).where(Identity.email == new_email))
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="Email already registered")
+
+            # Send verification email to new address
+            from app.services.email_verification_service import email_verification_service
+            from app.config import get_settings
+
+            settings = get_settings()
+            raw_code, _ = await email_verification_service.create_email_verification_token(identity.id, new_email)
+            await email_verification_service.send_verification_email(
+                to=new_email,
+                display_name=current_user.display_name or new_email,
+                verification_code=raw_code,
+                expiry_minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
+            )
+            verification_sent = True
+
     await db.flush()
 
-    # Send verification email if email was changed
-    if "email" in update_data and identity.email:
-        from app.services.email_verification_service import email_verification_service
-        from app.config import get_settings
-
-        settings = get_settings()
-        raw_code, _ = await email_verification_service.create_email_verification_token(identity.id, identity.email)
-        await email_verification_service.send_verification_email(
-            to=identity.email,
-            display_name=current_user.display_name or identity.email,
-            verification_code=raw_code,
-            expiry_minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
-        )
-
-    # Sync email/phone to OrgMember if changed
-    if "email" in update_data or "primary_mobile" in update_data:
+    # Sync phone to OrgMember if changed (email sync happens after verification)
+    if "primary_mobile" in update_data:
         from app.services.registration_service import registration_service
 
         await registration_service.sync_org_member_contact_from_user(
             db,
             current_user,
-            sync_email="email" in update_data,
-            sync_phone="primary_mobile" in update_data,
+            sync_email=False,
+            sync_phone=True,
         )
 
-    return UserOut.model_validate(current_user)
+    result = UserOut.model_validate(current_user)
+    if verification_sent:
+        result = result.model_dump()
+        result["verification_sent"] = True
+        result["message"] = "Verification email sent to new address. Please verify to complete the change."
+    return result
 
 
 @router.put("/me/password")
@@ -427,6 +439,15 @@ async def verify_email(
     identity = result.scalar_one_or_none()
     if not identity:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Update email if the verified email is different from current
+    new_email = token_data.get("email")
+    if new_email and new_email != identity.email:
+        # Check if the new email is already used by another identity
+        existing = await db.execute(select(Identity).where(Identity.email == new_email))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Email already registered by another user")
+        identity.email = new_email
 
     identity.email_verified = True
     identity.is_active = True

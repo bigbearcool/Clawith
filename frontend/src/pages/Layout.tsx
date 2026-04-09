@@ -114,7 +114,12 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
             if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Failed' })); throw new Error(err.detail); }
             const updated = await res.json();
             setUser(updated);
-            showMsg(isChinese ? '个人信息已更新' : 'Profile updated');
+            if (updated.verification_sent) {
+                setEmail(user?.email || '');  // Reset to original email since change is pending verification
+                showMsg(isChinese ? '验证邮件已发送到新邮箱，请验证后完成变更' : 'Verification email sent. Please verify to complete the change.');
+            } else {
+                showMsg(isChinese ? '个人信息已更新' : 'Profile updated');
+            }
         } catch (e: any) { showMsg(e.message || 'Failed', 'error'); }
         setSaving(false);
     };
