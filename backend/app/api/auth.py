@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -274,6 +275,29 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return UserOut.model_validate(current_user)
 
 
+@router.get("/my-tenants")
+async def get_my_tenants(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all tenants the current user belongs to."""
+    from app.models.tenant import Tenant
+
+    # Get user's current tenant
+    if current_user.tenant_id:
+        result = await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))
+        tenant = result.scalar_one_or_none()
+        if tenant:
+            return [
+                {
+                    "id": str(tenant.id),
+                    "name": tenant.name,
+                    "slug": tenant.slug,
+                }
+            ]
+    return []
+
+
 @router.patch("/me", response_model=UserOut)
 async def update_me(
     data: UserUpdate,
@@ -312,6 +336,7 @@ async def update_me(
         identity.username = update_data["username"]
     if "email" in update_data:
         identity.email = update_data["email"]
+        identity.email_verified = False  # Reset verification status when email changes
     if "primary_mobile" in update_data:
         identity.phone = update_data["primary_mobile"]
 
@@ -322,6 +347,20 @@ async def update_me(
             setattr(current_user, field, update_data[field])
 
     await db.flush()
+
+    # Send verification email if email was changed
+    if "email" in update_data and identity.email:
+        from app.services.email_verification_service import email_verification_service
+        from app.config import get_settings
+
+        settings = get_settings()
+        raw_code, _ = await email_verification_service.create_email_verification_token(identity.id, identity.email)
+        await email_verification_service.send_verification_email(
+            to=identity.email,
+            display_name=current_user.display_name or identity.email,
+            verification_code=raw_code,
+            expiry_minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
+        )
 
     # Sync email/phone to OrgMember if changed
     if "email" in update_data or "primary_mobile" in update_data:
@@ -359,6 +398,91 @@ async def change_password(
     current_user.password_hash = hash_password(new_password)
     await db.flush()
     return {"ok": True}
+
+
+# ─── Email Verification ─────────────────────────────────────────────
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+
+@router.post("/verify-email")
+async def verify_email(
+    data: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify email address with 6-digit code."""
+    from app.services.email_verification_service import email_verification_service
+
+    token_data = await email_verification_service.consume_email_verification_token(data.token)
+    if not token_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+    result = await db.execute(select(Identity).where(Identity.id == token_data["identity_id"]))
+    identity = result.scalar_one_or_none()
+    if not identity:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    identity.email_verified = True
+    identity.is_active = True
+    await db.commit()
+
+    user_result = await db.execute(select(User).where(User.identity_id == identity.id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    token = create_access_token(str(user.id), user.role)
+
+    return {
+        "ok": True,
+        "message": "Email verified successfully",
+        "access_token": token,
+        "user": UserOut.model_validate(user),
+        "needs_company_setup": not user.tenant_id,
+    }
+
+
+@router.post("/resend-verification")
+async def resend_verification(
+    data: ResendVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Resend email verification code."""
+    from app.services.email_verification_service import email_verification_service
+    from app.config import get_settings
+
+    result = await db.execute(select(Identity).where(Identity.email == data.email.lower().strip()))
+    identity = result.scalar_one_or_none()
+
+    if not identity:
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    if identity.email_verified:
+        return {"ok": True, "message": "Email already verified"}
+
+    if not identity.email:
+        raise HTTPException(status_code=400, detail="No email address on file")
+
+    user_result = await db.execute(select(User).where(User.identity_id == identity.id))
+    user = user_result.scalar_one_or_none()
+
+    settings = get_settings()
+    raw_code, expires_at = await email_verification_service.create_email_verification_token(identity.id, identity.email)
+
+    await email_verification_service.send_verification_email(
+        to=identity.email,
+        display_name=user.display_name if user and user.display_name else identity.email,
+        verification_code=raw_code,
+        expiry_minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
+    )
+
+    return {"ok": True, "message": "Verification code sent"}
 
 
 # ─── SSO/OAuth Endpoints ─────────────────────────────────────────────
