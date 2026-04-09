@@ -459,8 +459,16 @@ async def forgot_password(
         identity.id, identity.email
     )
 
-    # Build reset URL
-    base_url = settings.PUBLIC_BASE_URL or "http://localhost:3008"
+    # Get public_base_url from database (platform settings) or fallback to env/config
+    from app.models.system_settings import SystemSetting
+
+    platform_setting = await db.execute(select(SystemSetting).where(SystemSetting.key == "platform"))
+    platform_setting = platform_setting.scalar_one_or_none()
+    base_url = (
+        (platform_setting.value.get("public_base_url") if platform_setting and platform_setting.value else None)
+        or settings.PUBLIC_BASE_URL
+        or "http://localhost:3008"
+    )
     reset_url = f"{base_url}/reset-password?token={raw_token}"
 
     await send_password_reset_email(
