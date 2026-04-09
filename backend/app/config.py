@@ -48,9 +48,12 @@ def _default_agent_template_dir() -> str:
 
 def _read_version() -> str:
     """Read version from local VERSION file, fallback to root."""
-    for candidate in [Path(__file__).resolve().parent.parent / "VERSION",
-                      Path(__file__).resolve().parent.parent.parent / "VERSION",
-                      Path("/app/VERSION"), Path("/VERSION")]:
+    for candidate in [
+        Path(__file__).resolve().parent.parent / "VERSION",
+        Path(__file__).resolve().parent.parent.parent / "VERSION",
+        Path("/app/VERSION"),
+        Path("/VERSION"),
+    ]:
         try:
             return candidate.read_text(encoding="utf-8").strip()
         except OSError:
@@ -97,12 +100,18 @@ class Settings(BaseSettings):
     FEISHU_REDIRECT_URI: str = ""
     PUBLIC_BASE_URL: str = ""
 
-    # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # CORS - supports comma-separated origins from env var
+    # Default includes localhost, common dev ports, and allows any local network IP
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3008",
+        "http://localhost:5173",
+        "http://localhost:8008",
+        "*",  # Allow all origins for flexibility (set CORS_ORIGINS env var in production)
+    ]
 
     # Jina AI (Reader + Search APIs)
     JINA_API_KEY: str = ""
-
 
     # Sandbox configuration
     SANDBOX_TYPE: SandboxType = SandboxType.SUBPROCESS
