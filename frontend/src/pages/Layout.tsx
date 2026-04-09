@@ -92,6 +92,9 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
     const [resendingEmail, setResendingEmail] = useState(false);
     const [msg, setMsg] = useState('');
     const [msgType, setMsgType] = useState<'success' | 'error'>('success');
+    const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+    const [verificationCode, setVerificationCode] = useState('');
+    const [verifying, setVerifying] = useState(false);
 
     const showMsg = (text: string, type: 'success' | 'error' = 'success') => {
         setMsg(text); setMsgType(type); setTimeout(() => setMsg(''), 3000);
@@ -113,15 +116,38 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
             });
             if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Failed' })); throw new Error(err.detail); }
             const updated = await res.json();
-            setUser(updated);
             if (updated.verification_sent) {
-                setEmail(user?.email || '');  // Reset to original email since change is pending verification
-                showMsg(isChinese ? '验证邮件已发送到新邮箱，请验证后完成变更' : 'Verification email sent. Please verify to complete the change.');
+                setPendingEmail(email);  // Store the pending email
+                setEmail(user?.email || '');  // Reset to original email
+                showMsg(isChinese ? '验证邮件已发送到新邮箱，请在下方输入验证码' : 'Verification email sent. Enter the code below to complete the change.');
             } else {
+                setUser(updated);
                 showMsg(isChinese ? '个人信息已更新' : 'Profile updated');
             }
         } catch (e: any) { showMsg(e.message || 'Failed', 'error'); }
         setSaving(false);
+    };
+
+    const handleVerifyCode = async () => {
+        if (!verificationCode || verificationCode.length !== 6) {
+            showMsg(isChinese ? '请输入6位验证码' : 'Please enter 6-digit code', 'error');
+            return;
+        }
+        setVerifying(true);
+        try {
+            const res = await fetch('/api/auth/verify-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: verificationCode }),
+            });
+            if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Failed' })); throw new Error(err.detail); }
+            const data = await res.json();
+            setUser(data.user);
+            setPendingEmail(null);
+            setVerificationCode('');
+            showMsg(isChinese ? '邮箱验证成功！' : 'Email verified successfully!');
+        } catch (e: any) { showMsg(e.message || 'Failed', 'error'); }
+        setVerifying(false);
     };
 
     const handleResendVerification = async () => {
@@ -207,6 +233,41 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
                     <div><label style={labelStyle}>{isChinese ? '显示名称' : 'Display Name'}</label><input className="form-input" value={displayName} onChange={e => setDisplayName(e.target.value)} style={inputStyle} /></div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button className="btn btn-primary" onClick={handleSaveProfile} disabled={saving} style={{ padding: '6px 16px', fontSize: '12px' }}>{saving ? '...' : (isChinese ? '保存' : 'Save')}</button></div>
                 </div>
+                {/* Email Verification */}
+                {(pendingEmail || !user?.email_verified) && (
+                    <>
+                        <div style={{ borderTop: '1px solid var(--border-subtle)', marginBottom: '20px' }} />
+                        <h4 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                            {isChinese ? '邮箱验证' : 'Email Verification'}
+                        </h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                            {pendingEmail && (
+                                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                                    {isChinese ? `验证码已发送至 ${pendingEmail}` : `Code sent to ${pendingEmail}`}
+                                </div>
+                            )}
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <input
+                                    className="form-input"
+                                    type="text"
+                                    value={verificationCode}
+                                    onChange={e => setVerificationCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                                    placeholder={isChinese ? '6位验证码' : '6-digit code'}
+                                    style={{ ...inputStyle, letterSpacing: '4px', textAlign: 'center' }}
+                                    maxLength={6}
+                                />
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={handleVerifyCode}
+                                    disabled={verifying || verificationCode.length !== 6}
+                                    style={{ padding: '6px 16px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                                >
+                                    {verifying ? '...' : (isChinese ? '验证' : 'Verify')}
+                                </button>
+                            </div>
+                        </div>
+                    </>
+                )}
                 <div style={{ borderTop: '1px solid var(--border-subtle)', marginBottom: '20px' }} />
                 {/* Password */}
                 <h4 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>{isChinese ? '修改密码' : 'Change Password'}</h4>
