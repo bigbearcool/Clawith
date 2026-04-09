@@ -33,6 +33,19 @@ bash restart.sh       # 启动服务
 
 ## 核心命令
 
+### 数据库
+```bash
+cd backend
+.venv/bin/python seed.py                    # 初始化表结构和种子数据
+.venv/bin/alembic upgrade head              # 运行迁移（可选，seed.py 已处理）
+.venv/bin/alembic stamp head                # 标记当前版本（seed.py 自动执行）
+
+# 重置数据库（清空所有数据）
+dropdb clawith && createdb clawith && .venv/bin/python seed.py
+```
+
+**重要**：`seed.py` 会创建所有 41 个表并标记 alembic 版本。切勿混用 `Base.metadata.create_all` 和 alembic 迁移，否则会导致表结构不一致。
+
 ### 前端
 ```bash
 cd frontend
@@ -47,7 +60,6 @@ cd backend
 .venv/bin/python -m pytest tests/                          # 所有测试
 .venv/bin/python -m pytest tests/test_xxx.py               # 单个测试
 .venv/bin/ruff check app/                                  # Lint
-.venv/bin/python seed.py                                   # 数据库初始化
 ```
 
 ## 环境变量

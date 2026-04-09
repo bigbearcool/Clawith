@@ -1,39 +1,75 @@
-"""Seed data script — creates initial admin user and built-in templates."""
+"""Seed data script — creates all tables and seeds initial data.
+
+This script should be run after `alembic upgrade head` to populate initial data.
+For a fresh database, you can run this directly to create all tables.
+"""
 
 import asyncio
 import sys
+
 sys.path.insert(0, ".")
 
 from app.config import get_settings
 from app.core.security import hash_password
 from app.database import Base, engine, async_session
-# Import ALL models so Base.metadata.create_all can resolve all FKs
-from app.models.tenant import Tenant  # noqa: F401 — must be before user
-from app.models.user import User
-from app.models.agent import AgentTemplate  # noqa: F401
+
+# Import ALL models so Base.metadata.create_all can create all tables
+# Order matters for foreign key resolution
+from app.models.tenant import Tenant  # noqa: F401
+from app.models.user import User, Identity  # noqa: F401
+from app.models.identity import IdentityProvider, SSOScanSession  # noqa: F401
+from app.models.agent import Agent, AgentTemplate  # noqa: F401
 from app.models.llm import LLMModel  # noqa: F401
 from app.models.task import Task  # noqa: F401
-from app.models.skill import Skill  # noqa: F401
+from app.models.skill import Skill, SkillFile  # noqa: F401
 from app.models.tool import Tool  # noqa: F401
 from app.models.participant import Participant  # noqa: F401
 from app.models.channel_config import ChannelConfig  # noqa: F401
 from app.models.schedule import AgentSchedule  # noqa: F401
+from app.models.trigger import AgentTrigger  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
-from app.models.plaza import PlazaPost, PlazaComment  # noqa: F401
+from app.models.plaza import PlazaPost, PlazaComment, PlazaLike  # noqa: F401
 from app.models.activity_log import AgentActivityLog  # noqa: F401
 from app.models.org import OrgDepartment, OrgMember, AgentRelationship, AgentAgentRelationship  # noqa: F401
 from app.models.system_settings import SystemSetting  # noqa: F401
 from app.models.invitation_code import InvitationCode  # noqa: F401
+from app.models.agent_credential import AgentCredential  # noqa: F401
+from app.models.chat_session import ChatSession  # noqa: F401
+from app.models.gateway_message import GatewayMessage  # noqa: F401
+from app.models.notification import Notification  # noqa: F401
+from app.models.published_page import PublishedPage  # noqa: F401
+from app.models.tenant_setting import TenantSetting  # noqa: F401
 
 
 async def seed():
-    """Create tables and seed initial data."""
+    """Create tables and seed initial data.
+
+    This function:
+    1. Creates all tables using SQLAlchemy metadata (if not exist)
+    2. Seeds initial data (default tenant, agent templates)
+    3. Marks alembic as up-to-date (so future migrations work correctly)
+    """
     settings = get_settings()
 
-    # Create all tables
+    # Create all tables (idempotent - skips existing tables)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     print("✅ Database tables created")
+
+    # Mark alembic as up-to-date so future migrations work
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [".venv/bin/alembic", "stamp", "head"],
+            capture_output=True,
+            text=True,
+            cwd="/app" if settings.AGENT_DATA_DIR.startswith("/data") else ".",
+        )
+        if result.returncode == 0:
+            print("✅ Alembic marked as up-to-date")
+    except Exception:
+        pass  # Alembic may not be configured
 
     async with async_session() as db:
         # Note: No default admin user is seeded.
@@ -91,15 +127,14 @@ async def seed():
         ]
 
         for tmpl in templates:
-            existing = await db.execute(
-                select(AgentTemplate).where(AgentTemplate.name == tmpl["name"])
-            )
+            existing = await db.execute(select(AgentTemplate).where(AgentTemplate.name == tmpl["name"]))
             if not existing.scalar_one_or_none():
                 db.add(AgentTemplate(**tmpl))
                 print(f"✅ Template created: {tmpl['icon']} {tmpl['name']}")
 
         # 3. Demo agents for platform admin (if admin has zero agents)
         from app.models.agent import Agent
+
         admin_result = await db.execute(select(User).where(User.role == "platform_admin"))
         admin_user = admin_result.scalar_one_or_none()
         if admin_user:
@@ -133,6 +168,7 @@ async def seed():
 
                     # Initialize workspace directories
                     from pathlib import Path
+
                     ws_root = Path(settings.AGENT_DATA_DIR) / str(agent.id)
                     try:
                         for sub in ["workspace", "memory", "skills"]:
@@ -142,7 +178,9 @@ async def seed():
                             soul_path.write_text(f"# {agent.name}\n\n{agent.role_description}\n", encoding="utf-8")
                         mem_path = ws_root / "memory" / "memory.md"
                         if not mem_path.exists():
-                            mem_path.write_text("# Memory\n\n_Record important information and knowledge here._\n", encoding="utf-8")
+                            mem_path.write_text(
+                                "# Memory\n\n_Record important information and knowledge here._\n", encoding="utf-8"
+                            )
                     except OSError:
                         pass  # AGENT_DATA_DIR may not be writable
                     print(f"✅ Demo agent created: {agent.name}")
