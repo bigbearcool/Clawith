@@ -43,7 +43,9 @@ async def _archive_agent_task_history(db: AsyncSession, agent_id: uuid.UUID, arc
     }
 
     for task in tasks:
-        log_result = await db.execute(select(TaskLog).where(TaskLog.task_id == task.id).order_by(TaskLog.created_at.asc()))
+        log_result = await db.execute(
+            select(TaskLog).where(TaskLog.task_id == task.id).order_by(TaskLog.created_at.asc())
+        )
         logs = log_result.scalars().all()
         payload["tasks"].append(
             {
@@ -87,6 +89,7 @@ async def _lazy_reset_token_counters(agent: Agent, db: AsyncSession) -> bool:
     Returns True if any counter was reset (caller should commit/flush).
     """
     from datetime import datetime, timezone as tz
+
     now = datetime.now(tz.utc)
     changed = False
 
@@ -112,6 +115,7 @@ async def list_templates(
 ):
     """List all available agent templates."""
     from app.models.agent import AgentTemplate
+
     result = await db.execute(
         select(AgentTemplate).order_by(AgentTemplate.is_builtin.desc(), AgentTemplate.created_at.asc())
     )
@@ -164,12 +168,9 @@ async def list_agents(
     created = select(Agent).where(Agent.creator_id == current_user.id, Agent.tenant_id == user_tenant)
 
     # Get agents user has permission to (within their tenant)
-    permitted_ids = (
-        select(AgentPermission.agent_id)
-        .where(
-            (AgentPermission.scope_type == "company")
-            | ((AgentPermission.scope_type == "user") & (AgentPermission.scope_id == current_user.id))
-        )
+    permitted_ids = select(AgentPermission.agent_id).where(
+        (AgentPermission.scope_type == "company")
+        | ((AgentPermission.scope_type == "user") & (AgentPermission.scope_id == current_user.id))
     )
     permitted = select(Agent).where(Agent.id.in_(permitted_ids), Agent.tenant_id == user_tenant)
 
@@ -200,6 +201,7 @@ async def create_agent(
     """Create a new digital employee (any authenticated user)."""
     # Check agent creation quota
     from app.services.quota_guard import check_agent_creation_quota, QuotaExceeded
+
     try:
         await check_agent_creation_quota(current_user.id)
     except QuotaExceeded as e:
@@ -207,6 +209,7 @@ async def create_agent(
 
     # Calculate expiry time
     from datetime import datetime, timedelta, timezone as tz
+
     expires_at = datetime.now(tz.utc) + timedelta(hours=current_user.quota_agent_ttl_hours or 48)
 
     # Determine target tenant: normally user's tenant; admins can override via payload
@@ -222,6 +225,7 @@ async def create_agent(
     default_heartbeat_interval = 240  # model default
     if target_tenant_id:
         from app.models.tenant import Tenant
+
         tenant_result = await db.execute(select(Tenant).where(Tenant.id == target_tenant_id))
         tenant = tenant_result.scalar_one_or_none()
         if tenant:
@@ -230,7 +234,10 @@ async def create_agent(
             default_min_poll = tenant.min_poll_interval_floor or 5
             default_webhook_rate = tenant.max_webhook_rate_ceiling or 5
             # Enforce heartbeat floor: new agents must respect company minimum
-            if tenant.min_heartbeat_interval_minutes and tenant.min_heartbeat_interval_minutes > default_heartbeat_interval:
+            if (
+                tenant.min_heartbeat_interval_minutes
+                and tenant.min_heartbeat_interval_minutes > default_heartbeat_interval
+            ):
                 default_heartbeat_interval = tenant.min_heartbeat_interval_minutes
 
     agent = Agent(
@@ -262,10 +269,15 @@ async def create_agent(
 
     # Auto-create Participant identity for the new agent
     from app.models.participant import Participant
-    db.add(Participant(
-        type="agent", ref_id=agent.id,
-        display_name=agent.name, avatar_url=agent.avatar_url,
-    ))
+
+    db.add(
+        Participant(
+            type="agent",
+            ref_id=agent.id,
+            display_name=agent.name,
+            avatar_url=agent.avatar_url,
+        )
+    )
     await db.flush()
 
     # Set permissions
@@ -277,10 +289,14 @@ async def create_agent(
     elif data.permission_scope_type == "user":
         if data.permission_scope_ids:
             for scope_id in data.permission_scope_ids:
-                db.add(AgentPermission(agent_id=agent.id, scope_type="user", scope_id=scope_id, access_level=access_level))
+                db.add(
+                    AgentPermission(agent_id=agent.id, scope_type="user", scope_id=scope_id, access_level=access_level)
+                )
         else:
             # "仅自己" — insert creator as the only permitted user
-            db.add(AgentPermission(agent_id=agent.id, scope_type="user", scope_id=current_user.id, access_level="manage"))
+            db.add(
+                AgentPermission(agent_id=agent.id, scope_type="user", scope_id=current_user.id, access_level="manage")
+            )
 
     await db.flush()
 
@@ -296,8 +312,10 @@ async def create_agent(
 
     # Initialize agent file system from template
     from app.services.agent_manager import agent_manager
+
     await agent_manager.initialize_agent_files(
-        db, agent,
+        db,
+        agent,
         personality=data.personality,
         boundaries=data.boundaries,
     )
@@ -307,9 +325,7 @@ async def create_agent(
     from sqlalchemy.orm import selectinload
 
     # Always include default skills
-    default_result = await db.execute(
-        select(Skill).where(Skill.is_default)
-    )
+    default_result = await db.execute(select(Skill).where(Skill.is_default))
     default_ids = {s.id for s in default_result.scalars().all()}
 
     # Merge user-selected + default skill IDs
@@ -321,9 +337,7 @@ async def create_agent(
         skills_dir.mkdir(parents=True, exist_ok=True)
 
         for sid in all_skill_ids:
-            result = await db.execute(
-                select(Skill).where(Skill.id == sid).options(selectinload(Skill.files))
-            )
+            result = await db.execute(select(Skill).where(Skill.id == sid).options(selectinload(Skill.files)))
             skill = result.scalar_one_or_none()
             if not skill:
                 continue
@@ -336,7 +350,7 @@ async def create_agent(
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 file_path.write_text(sf.content, encoding="utf-8")
 
-    # Start container
+    # Start container (only for OpenClaw agents)
     await agent_manager.start_container(db, agent)
     await db.flush()
 
@@ -364,10 +378,9 @@ async def get_agent(
     if agent.creator_id:
         from sqlalchemy.orm import selectinload
         from app.models.user import Identity  # noqa: F401
+
         creator_result = await db.execute(
-            select(User)
-            .where(User.id == agent.creator_id)
-            .options(selectinload(User.identity))
+            select(User).where(User.id == agent.creator_id).options(selectinload(User.identity))
         )
         creator = creator_result.scalar_one_or_none()
         out["creator_username"] = creator.username if creator else None
@@ -376,6 +389,7 @@ async def get_agent(
     effective_tz = agent.timezone
     if not effective_tz and agent.tenant_id:
         from app.models.tenant import Tenant
+
         t_result = await db.execute(select(Tenant).where(Tenant.id == agent.tenant_id))
         tenant = t_result.scalar_one_or_none()
         if tenant:
@@ -397,7 +411,12 @@ async def get_agent_permissions(
     perms = result.scalars().all()
 
     if not perms:
-        return {"scope_type": "user", "scope_ids": [], "access_level": "manage" if is_agent_creator(current_user, agent) else "use", "is_owner": is_agent_creator(current_user, agent)}
+        return {
+            "scope_type": "user",
+            "scope_ids": [],
+            "access_level": "manage" if is_agent_creator(current_user, agent) else "use",
+            "is_owner": is_agent_creator(current_user, agent),
+        }
 
     scope_type = perms[0].scope_type
     scope_ids = [str(p.scope_id) for p in perms if p.scope_id]
@@ -443,6 +462,7 @@ async def update_agent_permissions(
 
     # Delete existing permissions
     from sqlalchemy import delete as sql_delete
+
     await db.execute(sql_delete(AgentPermission).where(AgentPermission.agent_id == agent_id))
 
     # Insert new permissions
@@ -451,10 +471,16 @@ async def update_agent_permissions(
     elif scope_type == "user":
         if scope_ids:
             for sid in scope_ids:
-                db.add(AgentPermission(agent_id=agent_id, scope_type="user", scope_id=uuid.UUID(sid), access_level=access_level))
+                db.add(
+                    AgentPermission(
+                        agent_id=agent_id, scope_type="user", scope_id=uuid.UUID(sid), access_level=access_level
+                    )
+                )
         else:
             # "仅自己"
-            db.add(AgentPermission(agent_id=agent_id, scope_type="user", scope_id=current_user.id, access_level="manage"))
+            db.add(
+                AgentPermission(agent_id=agent_id, scope_type="user", scope_id=current_user.id, access_level="manage")
+            )
 
     await db.commit()
     return {"status": "ok"}
@@ -473,7 +499,9 @@ async def update_agent(
     is_admin = current_user.role in ("platform_admin", "org_admin")
 
     if not is_agent_creator(current_user, agent) and not is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only creator or admin can update agent settings")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only creator or admin can update agent settings"
+        )
 
     update_data = data.model_dump(exclude_unset=True)
 
@@ -482,6 +510,7 @@ async def update_agent(
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can modify agent expiry time")
         from datetime import datetime, timezone as tz
+
         new_expires = update_data["expires_at"]
         # Allow any value: extend, shorten, or null (permanent).
         # Re-activate the agent if new expiry is in the future or cleared.
@@ -494,21 +523,25 @@ async def update_agent(
     clamped_fields = []  # track fields adjusted by tenant floor
     if "heartbeat_interval_minutes" in update_data and current_user.tenant_id:
         from app.models.tenant import Tenant
+
         t_result = await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))
         tenant = t_result.scalar_one_or_none()
         if tenant and update_data["heartbeat_interval_minutes"] < tenant.min_heartbeat_interval_minutes:
             update_data["heartbeat_interval_minutes"] = tenant.min_heartbeat_interval_minutes
-            clamped_fields.append({
-                "field": "heartbeat_interval_minutes",
-                "requested": update_data["heartbeat_interval_minutes"],
-                "applied": tenant.min_heartbeat_interval_minutes,
-                "reason": "company_floor",
-            })
+            clamped_fields.append(
+                {
+                    "field": "heartbeat_interval_minutes",
+                    "requested": update_data["heartbeat_interval_minutes"],
+                    "applied": tenant.min_heartbeat_interval_minutes,
+                    "reason": "company_floor",
+                }
+            )
 
     # Enforce trigger limit floors from tenant
     trigger_fields = {"min_poll_interval_min", "webhook_rate_limit", "max_triggers"}
     if trigger_fields & set(update_data.keys()) and current_user.tenant_id:
         from app.models.tenant import Tenant
+
         t_result = await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))
         tenant = t_result.scalar_one_or_none()
         if tenant:
@@ -516,22 +549,26 @@ async def update_agent(
                 original = update_data["min_poll_interval_min"]
                 update_data["min_poll_interval_min"] = max(original, tenant.min_poll_interval_floor)
                 if update_data["min_poll_interval_min"] != original:
-                    clamped_fields.append({
-                        "field": "min_poll_interval_min",
-                        "requested": original,
-                        "applied": update_data["min_poll_interval_min"],
-                        "reason": "company_floor",
-                    })
+                    clamped_fields.append(
+                        {
+                            "field": "min_poll_interval_min",
+                            "requested": original,
+                            "applied": update_data["min_poll_interval_min"],
+                            "reason": "company_floor",
+                        }
+                    )
             if "webhook_rate_limit" in update_data:
                 original = update_data["webhook_rate_limit"]
                 update_data["webhook_rate_limit"] = min(original, tenant.max_webhook_rate_ceiling)
                 if update_data["webhook_rate_limit"] != original:
-                    clamped_fields.append({
-                        "field": "webhook_rate_limit",
-                        "requested": original,
-                        "applied": update_data["webhook_rate_limit"],
-                        "reason": "company_ceiling",
-                    })
+                    clamped_fields.append(
+                        {
+                            "field": "webhook_rate_limit",
+                            "requested": original,
+                            "applied": update_data["webhook_rate_limit"],
+                            "reason": "company_ceiling",
+                        }
+                    )
 
     for field, value in update_data.items():
         setattr(agent, field, value)
@@ -540,6 +577,7 @@ async def update_agent(
     # Sync Participant display_name / avatar if changed
     if "name" in update_data or "avatar_url" in update_data:
         from app.models.participant import Participant
+
         p_r = await db.execute(select(Participant).where(Participant.type == "agent", Participant.ref_id == agent_id))
         p = p_r.scalar_one_or_none()
         if p:
@@ -563,11 +601,16 @@ async def delete_agent(
 ):
     """Delete a digital employee (creator only)."""
     agent, _access = await check_agent_access(db, current_user, agent_id)
-    if not is_agent_creator(current_user, agent) and current_user.role not in ("super_admin", "org_admin", "platform_admin"):
+    if not is_agent_creator(current_user, agent) and current_user.role not in (
+        "super_admin",
+        "org_admin",
+        "platform_admin",
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only creator or admin can delete agent")
 
     # Stop container and archive files (best effort)
     from app.services.agent_manager import agent_manager
+
     archive_dir: Path | None = None
     try:
         await agent_manager.remove_container(agent)
@@ -670,6 +713,7 @@ async def start_agent(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only creator can start agent")
 
     from app.services.agent_manager import agent_manager
+
     await agent_manager.start_container(db, agent)
     await db.flush()
     return AgentOut.model_validate(agent)
@@ -687,6 +731,7 @@ async def stop_agent(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only creator can stop agent")
 
     from app.services.agent_manager import agent_manager
+
     await agent_manager.stop_container(agent)
     await db.flush()
     return AgentOut.model_validate(agent)
@@ -705,9 +750,12 @@ async def list_agent_approvals(
     """List approval requests for a specific agent. Only creator or admin can view."""
     agent, _access = await check_agent_access(db, current_user, agent_id)
     if not is_agent_creator(current_user, agent) and current_user.role not in ("platform_admin", "org_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only agent creator or admin can view approvals")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only agent creator or admin can view approvals"
+        )
 
     from app.models.audit import ApprovalRequest
+
     query = select(ApprovalRequest).where(ApprovalRequest.agent_id == agent_id)
     if status_filter:
         query = query.where(ApprovalRequest.status == status_filter)
@@ -742,6 +790,7 @@ async def resolve_agent_approval(
     agent, _access = await check_agent_access(db, current_user, agent_id)
 
     from app.services.autonomy_service import autonomy_service
+
     action = data.get("action", "reject")
     try:
         approval = await autonomy_service.resolve_approval(db, approval_id, current_user, action)
@@ -790,6 +839,7 @@ async def list_gateway_messages(
     agent, _access = await check_agent_access(db, current_user, agent_id)
 
     from app.models.gateway_message import GatewayMessage
+
     result = await db.execute(
         select(GatewayMessage)
         .where(GatewayMessage.agent_id == agent_id)
@@ -804,14 +854,16 @@ async def list_gateway_messages(
         if m.sender_agent_id:
             r = await db.execute(select(Agent.name).where(Agent.id == m.sender_agent_id))
             sender_name = r.scalar_one_or_none()
-        out.append({
-            "id": str(m.id),
-            "sender_agent_name": sender_name,
-            "content": m.content,
-            "status": m.status,
-            "result": m.result,
-            "created_at": m.created_at.isoformat() if m.created_at else None,
-            "delivered_at": m.delivered_at.isoformat() if m.delivered_at else None,
-            "completed_at": m.completed_at.isoformat() if m.completed_at else None,
-        })
+        out.append(
+            {
+                "id": str(m.id),
+                "sender_agent_name": sender_name,
+                "content": m.content,
+                "status": m.status,
+                "result": m.result,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "delivered_at": m.delivered_at.isoformat() if m.delivered_at else None,
+                "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+            }
+        )
     return out

@@ -35,8 +35,9 @@ class AgentManager:
     def _template_dir(self) -> Path:
         return Path(settings.AGENT_TEMPLATE_DIR)
 
-    async def initialize_agent_files(self, db: AsyncSession, agent: Agent,
-                                      personality: str = "", boundaries: str = "") -> None:
+    async def initialize_agent_files(
+        self, db: AsyncSession, agent: Agent, personality: str = "", boundaries: str = ""
+    ) -> None:
         """Copy template files and customize for this agent."""
         agent_dir = self._agent_dir(agent.id)
         template_dir = self._template_dir()
@@ -62,6 +63,7 @@ class AgentManager:
         soul_path = agent_dir / "soul.md"
         # Get creator name
         from app.models.user import User
+
         result = await db.execute(select(User).where(User.id == agent.creator_id))
         creator = result.scalar_one_or_none()
         creator_name = creator.display_name if creator else "Unknown"
@@ -79,12 +81,13 @@ class AgentManager:
             """Replace existing ## SectionName or append if not found."""
             if not section_content:
                 return content
-            
+
             # Pattern to match existing section (case-insensitive header)
             import re
+
             pattern = rf"^##\s+{re.escape(section_name)}\s*$"
-            lines = content.split('\n')
-            
+            lines = content.split("\n")
+
             # Find the section header
             for i, line in enumerate(lines):
                 if re.match(pattern, line.strip(), re.IGNORECASE):
@@ -92,15 +95,15 @@ class AgentManager:
                     section_start = i
                     section_end = len(lines)
                     for j in range(i + 1, len(lines)):
-                        if lines[j].strip().startswith('## '):
+                        if lines[j].strip().startswith("## "):
                             section_end = j
                             break
-                    
+
                     # Replace the section content (with trailing newline for proper spacing)
                     new_section = f"## {section_name}\n{section_content}\n"
                     lines = lines[:section_start] + [new_section] + lines[section_end:]
-                    return '\n'.join(lines)
-            
+                    return "\n".join(lines)
+
             # Section not found - append at the end
             return content + f"\n## {section_name}\n{section_content}\n"
 
@@ -119,14 +122,18 @@ class AgentManager:
         refl_path = agent_dir / "memory" / "reflections.md"
         if not refl_path.exists():
             refl_template = Path(__file__).parent.parent / "templates" / "reflections.md"
-            refl_content = refl_template.read_text(encoding="utf-8") if refl_template.exists() else "# Reflections Journal\n"
+            refl_content = (
+                refl_template.read_text(encoding="utf-8") if refl_template.exists() else "# Reflections Journal\n"
+            )
             refl_path.write_text(refl_content, encoding="utf-8")
 
         # Ensure HEARTBEAT.md exists — copy from central template
         hb_path = agent_dir / "HEARTBEAT.md"
         if not hb_path.exists():
             hb_template = Path(__file__).parent.parent / "templates" / "HEARTBEAT.md"
-            hb_content = hb_template.read_text(encoding="utf-8") if hb_template.exists() else "# Heartbeat Instructions\n"
+            hb_content = (
+                hb_template.read_text(encoding="utf-8") if hb_template.exists() else "# Heartbeat Instructions\n"
+            )
             hb_path.write_text(hb_content, encoding="utf-8")
 
         # Customize state.json
@@ -162,8 +169,17 @@ class AgentManager:
     async def start_container(self, db: AsyncSession, agent: Agent) -> str | None:
         """Start an OpenClaw Gateway Docker container for the agent.
 
+        Only OpenClaw-type agents need containers. Native agents run via WebSocket
+        directly and should not call this method.
+
         Returns container_id or None if Docker not available.
         """
+        if agent.agent_type != "openclaw":
+            agent.status = "idle"
+            agent.last_active_at = datetime.now(timezone.utc)
+            logger.info(f"Non-OpenClaw agent {agent.name}, skipping container start")
+            return None
+
         if not self.docker_client:
             logger.info("Docker not available, skipping container start")
             agent.status = "idle"
