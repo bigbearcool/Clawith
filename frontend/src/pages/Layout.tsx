@@ -171,7 +171,7 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
                     <div>
                         <label style={labelStyle}>{isChinese ? '邮箱' : 'Email'}</label>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} disabled />
+                            <input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} />
                             {user?.email_verified ? (
                                 <span style={{ color: '#16a34a', fontSize: '12px', whiteSpace: 'nowrap' }}>✓ {isChinese ? '已验证' : 'Verified'}</span>
                             ) : (
