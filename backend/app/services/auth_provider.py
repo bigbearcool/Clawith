@@ -240,7 +240,7 @@ class BaseAuthProvider(ABC):
         identity = Identity(
             email=email,
             username=username,
-            password_hash=hash_password(user_info.provider_user_id),
+            password_hash=None,  # SSO users don't have password initially
             phone=phone,
             email_verified=bool(user_info.email),
             is_active=True,
