@@ -1076,15 +1076,15 @@ function RelationshipEditor({ agentId, readOnly = false }: { agentId: string; re
     useEffect(() => {
         if (!search || search.length < 1) { setSearchResults([]); return; }
         const t = setTimeout(() => {
-            fetchAuth<any[]>(`/enterprise/org/members?search=${encodeURIComponent(search)}`).then(setSearchResults);
+            fetchAuth<any[]>(`/users/?search=${encodeURIComponent(search)}`).then(setSearchResults);
         }, 300);
         return () => clearTimeout(t);
     }, [search]);
 
     const addRelationship = async () => {
         if (!adding) return;
-        const existing = relationships.map((r: any) => ({ member_id: r.member_id, relation: r.relation, description: r.description }));
-        existing.push({ member_id: adding.id, relation, description });
+        const existing = relationships.map((r: any) => ({ user_id: r.user_id || r.member_id, relation: r.relation, description: r.description }));
+        existing.push({ user_id: adding.user_id || adding.id, relation, description });
         await fetchAuth(`/agents/${agentId}/relationships/`, { method: 'PUT', body: JSON.stringify({ relationships: existing }) });
         setAdding(null); setSearch(''); setRelation('collaborator'); setDescription('');
         refetch();
@@ -1110,7 +1110,7 @@ function RelationshipEditor({ agentId, readOnly = false }: { agentId: string; re
     };
     const saveEditRelationship = async (targetId: string) => {
         const updated = relationships.map((r: any) => ({
-            member_id: r.member_id,
+            user_id: r.user_id || r.member_id,
             relation: r.id === targetId ? editRelation : r.relation,
             description: r.id === targetId ? editDescription : r.description,
         }));
@@ -1168,7 +1168,6 @@ function RelationshipEditor({ agentId, readOnly = false }: { agentId: string; re
                             <div key={r.id} style={{
                                     borderRadius: '8px', border: '1px solid var(--border-subtle)',
                                     overflow: 'hidden',
-                                    // Fade out row while delete is in-flight
                                     opacity: deletingIds.has(r.id) ? 0.4 : 1,
                                     transition: 'opacity 0.2s ease',
                                     pointerEvents: deletingIds.has(r.id) ? 'none' : 'auto',
@@ -1178,8 +1177,7 @@ function RelationshipEditor({ agentId, readOnly = false }: { agentId: string; re
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontWeight: 600, fontSize: '13px' }}>{r.member?.name || '?'} <span className="badge" style={{ fontSize: '10px', marginLeft: '4px' }}>{r.relation_label}</span></div>
                                         <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                                            {r.member?.provider_name && <span style={{ color: 'var(--accent-color)', fontWeight: 500, marginRight: '6px' }}>[{r.member.provider_name}]</span>}
-                                            {r.member?.department_path || ''} · {r.member?.email || ''}
+                                            {r.member?.email || 'No email'} {r.member?.phone ? `· ${r.member.phone}` : ''}
                                         </div>
                                         {r.description && editingId !== r.id && <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>{r.description}</div>}
                                     </div>
@@ -1220,15 +1218,14 @@ function RelationshipEditor({ agentId, readOnly = false }: { agentId: string; re
                         <input className="input" placeholder={t("agent.detail.searchMembers")} value={search} onChange={e => setSearch(e.target.value)} style={{ fontSize: '13px' }} />
                         {searchResults.length > 0 && (
                             <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-primary)', border: '1px solid var(--border-subtle)', borderRadius: '6px', marginTop: '4px', maxHeight: '200px', overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-                                {searchResults.map((m: any) => (
-                                    <div key={m.id} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', borderBottom: '1px solid var(--border-subtle)' }}
-                                        onClick={() => { setAdding(m); setSearch(''); setSearchResults([]); }}
+                                {searchResults.map((u: any) => (
+                                    <div key={u.id} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', borderBottom: '1px solid var(--border-subtle)' }}
+                                        onClick={() => { setAdding(u); setSearch(''); setSearchResults([]); }}
                                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
                                         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                                        <div style={{ fontWeight: 500 }}>{m.name}</div>
+                                        <div style={{ fontWeight: 500 }}>{u.display_name || u.username || 'Unnamed'}</div>
                                         <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                                            {m.provider_name && <span style={{ color: 'var(--accent-color)', fontWeight: 500, marginRight: '6px' }}>[{m.provider_name}]</span>}
-                                            {m.department_path} · {m.email}
+                                            {u.email || 'No email'} {u.primary_mobile ? `· ${u.primary_mobile}` : ''}
                                         </div>
                                     </div>
                                 ))}
@@ -1239,9 +1236,9 @@ function RelationshipEditor({ agentId, readOnly = false }: { agentId: string; re
                 {!readOnly && adding && (
                     <div style={{ border: '1px solid var(--accent-primary)', borderRadius: '8px', padding: '12px', background: 'var(--bg-elevated)' }}>
                         <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '8px' }}>
-                            {t('agent.detail.addRelationship')}: {adding.name}
+                            {t('agent.detail.addRelationship')}: {adding.display_name || adding.username || 'Unnamed'}
                             <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: '8px' }}>
-                                ({adding.provider_name ? `[${adding.provider_name}] ` : ''}{adding.department_path} · {adding.email})
+                                ({adding.email || 'No email'} {adding.primary_mobile ? `· ${adding.primary_mobile}` : ''})
                             </span>
                         </div>
                         <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>

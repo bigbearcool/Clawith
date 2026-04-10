@@ -12,6 +12,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.agent import Agent
+    from app.models.user import User
 
 
 class OrgDepartment(Base):
@@ -66,7 +67,7 @@ class OrgMember(Base):
 
 
 class AgentRelationship(Base):
-    """Relationship between an agent and an org member."""
+    """Relationship between an agent and a user (enterprise member)."""
 
     __tablename__ = "agent_relationships"
 
@@ -74,13 +75,12 @@ class AgentRelationship(Base):
     agent_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
-    member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("org_members.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     relation: Mapped[str] = mapped_column(String(50), nullable=False, default="collaborator")
     description: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-
-member: Mapped["OrgMember"] = relationship()
+    user: Mapped["User"] = relationship(lazy="selectin")
 
 
 class AgentGroup(Base):

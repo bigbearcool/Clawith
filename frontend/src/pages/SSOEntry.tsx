@@ -71,6 +71,16 @@ export default function SSOEntry() {
             try {
                 setPolling(true);
                 const res = await fetchJson<any>(`/sso/session/${sid}/status`);
+                
+                // Handle needs_binding status - redirect to bind page
+                if (res?.status === 'needs_binding') {
+                    const params = new URLSearchParams({ token: sid, provider: res.provider_type || 'feishu' });
+                    if (res.suggested_mobile) params.set('mobile', res.suggested_mobile);
+                    if (res.suggested_email) params.set('email', res.suggested_email);
+                    navigate(`/sso-bind?${params.toString()}`);
+                    return;
+                }
+                
                 if (res?.access_token && res?.user) {
                     setAuth(res.user, res.access_token);
                     if (res.user && !res.user.tenant_id) {

@@ -21,6 +21,16 @@ class UserQuotaUpdate(BaseModel):
     quota_agent_ttl_hours: int | None = None
 
 
+class ChannelIdentity(BaseModel):
+    """用户在某个渠道的身份信息"""
+
+    provider_type: str  # feishu, dingtalk, wecom
+    external_id: str | None = None  # user_id in that platform
+    open_id: str | None = None  # app-specific open_id
+    unionid: str | None = None  # cross-app union_id
+    name: str | None = None  # name in that platform
+
+
 class UserOut(BaseModel):
     id: uuid.UUID
     # username/email/display_name can be None for SSO-created users whose Identity
@@ -41,7 +51,9 @@ class UserOut(BaseModel):
     agents_count: int = 0
     # Source info
     created_at: str | None = None
-    source: str = 'registered'  # 'registered' | 'feishu' | 'dingtalk' | 'wecom' | etc.
+    source: str = "registered"  # 'registered' | 'feishu' | 'dingtalk' | 'wecom' | etc.
+    # Channel identities (OrgMember bindings)
+    channel_identities: list[ChannelIdentity] = []
 
     model_config = {"from_attributes": True}
 
@@ -61,17 +73,45 @@ async def list_users(
 
     # Filter users by tenant — platform_admins only shown in their own tenant
     result = await db.execute(
-        select(User).options(selectinload(User.identity)).where(
-            User.tenant_id == tid
-        ).order_by(User.created_at.asc())
+        select(User).options(selectinload(User.identity)).where(User.tenant_id == tid).order_by(User.created_at.asc())
     )
     users = result.scalars().all()
+
+    # Batch query OrgMembers for all users
+    from app.models.org import OrgMember
+    from app.models.identity import IdentityProvider
+
+    user_ids = [u.id for u in users]
+    org_members_result = await db.execute(
+        select(OrgMember, IdentityProvider.provider_type)
+        .join(IdentityProvider, OrgMember.provider_id == IdentityProvider.id)
+        .where(OrgMember.user_id.in_(user_ids), OrgMember.status == "active")
+    )
+    org_members_rows = org_members_result.all()
+
+    # Group OrgMembers by user_id
+    user_channel_map: dict = {}
+    for member, provider_type in org_members_rows:
+        uid = str(member.user_id)
+        if uid not in user_channel_map:
+            user_channel_map[uid] = []
+        user_channel_map[uid].append(
+            ChannelIdentity(
+                provider_type=provider_type,
+                external_id=member.external_id,
+                open_id=member.open_id,
+                unionid=member.unionid,
+                name=member.name,
+            )
+        )
 
     out = []
     for u in users:
         # Count non-expired agents
         count_result = await db.execute(
-            select(func.count()).select_from(Agent).where(
+            select(func.count())
+            .select_from(Agent)
+            .where(
                 Agent.creator_id == u.id,
                 Agent.is_expired == False,
             )
@@ -94,7 +134,8 @@ async def list_users(
             "quota_agent_ttl_hours": u.quota_agent_ttl_hours,
             "agents_count": agents_count,
             "created_at": u.created_at.isoformat() if u.created_at else None,
-            "source": (u.registration_source or 'registered'),
+            "source": (u.registration_source or "registered"),
+            "channel_identities": user_channel_map.get(str(u.id), []),
         }
         out.append(UserOut(**user_dict))
     return out
@@ -111,9 +152,7 @@ async def update_user_quota(
     if current_user.role not in ("platform_admin", "org_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    result = await db.execute(
-        select(User).options(selectinload(User.identity)).where(User.id == user_id)
-    )
+    result = await db.execute(select(User).options(selectinload(User.identity)).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -137,7 +176,9 @@ async def update_user_quota(
 
     # Count agents
     count_result = await db.execute(
-        select(func.count()).select_from(Agent).where(
+        select(func.count())
+        .select_from(Agent)
+        .where(
             Agent.creator_id == user.id,
             Agent.is_expired == False,
         )
@@ -145,8 +186,12 @@ async def update_user_quota(
     agents_count = count_result.scalar() or 0
 
     return UserOut(
-        id=user.id, username=user.username, email=user.email,
-        display_name=user.display_name, role=user.role, is_active=user.is_active,
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        display_name=user.display_name,
+        role=user.role,
+        is_active=user.is_active,
         quota_message_limit=user.quota_message_limit,
         quota_message_period=user.quota_message_period,
         quota_messages_used=user.quota_messages_used,
@@ -157,6 +202,7 @@ async def update_user_quota(
 
 
 # ─── Role Management ───────────────────────────────────
+
 
 class RoleUpdate(BaseModel):
     role: str
@@ -191,9 +237,7 @@ async def update_user_role(
         raise HTTPException(status_code=400, detail=f"Invalid role. Allowed: {', '.join(allowed_roles)}")
 
     # Find target user
-    result = await db.execute(
-        select(User).options(selectinload(User.identity)).where(User.id == user_id)
-    )
+    result = await db.execute(select(User).options(selectinload(User.identity)).where(User.id == user_id))
     target_user = result.scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -209,7 +253,9 @@ async def update_user_role(
     # Last-admin protection: if demoting an org_admin, check they are not the only one
     if target_user.role in ("org_admin", "platform_admin") and data.role not in ("org_admin", "platform_admin"):
         admin_count_result = await db.execute(
-            select(func.count()).select_from(User).where(
+            select(func.count())
+            .select_from(User)
+            .where(
                 User.tenant_id == target_user.tenant_id,
                 User.role.in_(["org_admin", "platform_admin"]),
             )
@@ -217,10 +263,173 @@ async def update_user_role(
         admin_count = admin_count_result.scalar() or 0
         if admin_count <= 1:
             raise HTTPException(
-                status_code=400,
-                detail="Cannot demote the only administrator. Promote another user first."
+                status_code=400, detail="Cannot demote the only administrator. Promote another user first."
             )
 
     target_user.role = data.role
     await db.commit()
     return {"status": "ok", "user_id": str(user_id), "role": data.role}
+
+
+# ─── User Merge ───────────────────────────────────
+
+
+@router.get("/unbound", response_model=list[UserOut])
+async def list_unbound_users(
+    tenant_id: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List users without email or phone in their Identity (admin only).
+
+    These users can be merged into other users who have verified contact info.
+    """
+    if current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    from app.models.user import Identity
+
+    tid = tenant_id if tenant_id and current_user.role == "platform_admin" else str(current_user.tenant_id)
+
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.identity))
+        .join(Identity, User.identity_id == Identity.id)
+        .where(
+            User.tenant_id == tid,
+            (Identity.email == None) | (Identity.email == ""),
+            (Identity.phone == None) | (Identity.phone == ""),
+        )
+        .order_by(User.created_at.asc())
+    )
+    users = result.scalars().all()
+
+    out = []
+    for u in users:
+        count_result = await db.execute(
+            select(func.count())
+            .select_from(Agent)
+            .where(
+                Agent.creator_id == u.id,
+                Agent.is_expired == False,
+            )
+        )
+        agents_count = count_result.scalar() or 0
+
+        out.append(
+            UserOut(
+                id=u.id,
+                username=u.username or u.email or f"{u.registration_source or 'user'}_{str(u.id)[:8]}",
+                email=u.email or "",
+                display_name=u.display_name or u.username or "",
+                role=u.role,
+                is_active=u.is_active,
+                quota_message_limit=u.quota_message_limit,
+                quota_message_period=u.quota_message_period,
+                quota_messages_used=u.quota_messages_used,
+                quota_max_agents=u.quota_max_agents,
+                quota_agent_ttl_hours=u.quota_agent_ttl_hours,
+                agents_count=agents_count,
+                created_at=u.created_at.isoformat() if u.created_at else None,
+                source=(u.registration_source or "registered"),
+            )
+        )
+    return out
+
+
+@router.post("/{user_id}/merge-to/{target_user_id}")
+async def merge_user(
+    user_id: uuid.UUID,
+    target_user_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Merge user_id into target_user_id (admin only).
+
+    This will:
+    1. Migrate all chat_messages, chat_sessions, agents, org_members to target_user_id
+    2. Delete the source user and its identity (if no other users reference it)
+
+    WARNING: This operation is irreversible.
+    """
+    if current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    if user_id == target_user_id:
+        raise HTTPException(status_code=400, detail="Cannot merge user to itself")
+
+    from sqlalchemy import text
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    source_user = result.scalar_one_or_none()
+    if not source_user:
+        raise HTTPException(status_code=404, detail="Source user not found")
+
+    result = await db.execute(select(User).where(User.id == target_user_id))
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+
+    if source_user.tenant_id != current_user.tenant_id or target_user.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot merge users outside your organization")
+
+    if source_user.role == "platform_admin":
+        raise HTTPException(status_code=400, detail="Cannot merge platform_admin user")
+
+    source_identity_id = source_user.identity_id
+
+    await db.execute(
+        text("UPDATE chat_messages SET user_id = :target_id WHERE user_id = :source_id"),
+        {"target_id": str(target_user_id), "source_id": str(user_id)},
+    )
+
+    await db.execute(
+        text("UPDATE chat_sessions SET user_id = :target_id WHERE user_id = :source_id"),
+        {"target_id": str(target_user_id), "source_id": str(user_id)},
+    )
+
+    await db.execute(
+        text("UPDATE agents SET creator_id = :target_id WHERE creator_id = :source_id"),
+        {"target_id": str(target_user_id), "source_id": str(user_id)},
+    )
+
+    await db.execute(
+        text("UPDATE org_members SET user_id = :target_id WHERE user_id = :source_id"),
+        {"target_id": str(target_user_id), "source_id": str(user_id)},
+    )
+
+    await db.execute(
+        text("UPDATE agent_relationships SET user_id = :target_id WHERE user_id = :source_id"),
+        {"target_id": str(target_user_id), "source_id": str(user_id)},
+    )
+
+    await db.execute(text("DELETE FROM users WHERE id = :id"), {"id": str(user_id)})
+
+    result = await db.execute(
+        text("SELECT COUNT(*) FROM users WHERE identity_id = :identity_id"), {"identity_id": str(source_identity_id)}
+    )
+    identity_ref_count = result.scalar() or 0
+    if identity_ref_count == 0 and source_identity_id:
+        await db.execute(text("DELETE FROM identities WHERE id = :id"), {"id": str(source_identity_id)})
+
+    # Mark target user's email/phone as verified (admin merge is trusted)
+    target_identity_id = target_user.identity_id
+    if target_identity_id:
+        await db.execute(
+            text("""
+                UPDATE identities 
+                SET email_verified = CASE WHEN email IS NOT NULL AND email != '' AND email NOT LIKE '%.local' THEN true ELSE email_verified END,
+                    phone_verified = CASE WHEN phone IS NOT NULL AND phone != '' THEN true ELSE phone_verified END
+                WHERE id = :id
+            """),
+            {"id": str(target_identity_id)},
+        )
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "message": f"User {source_user.display_name or source_user.username} merged into {target_user.display_name or target_user.username}",
+        "deleted_user_id": str(user_id),
+        "target_user_id": str(target_user_id),
+    }

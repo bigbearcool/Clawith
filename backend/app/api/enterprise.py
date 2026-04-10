@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, func, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -536,6 +536,39 @@ async def update_tenant_quotas(
 
 class TestEmailRequest(BaseModel):
     email: str
+
+
+# ─── SMS Configuration ───────────────────────────────────
+
+
+class TestSmsRequest(BaseModel):
+    mobile: str = Field(description="Mobile number to send test SMS")
+
+
+@router.post("/system-sms/test")
+async def send_test_sms_endpoint(
+    data: TestSmsRequest,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a test SMS to verify SMS configuration (admin only)."""
+    from app.services.sms_service import sms_service
+    from app.services.identity_service import normalize_mobile
+
+    normalized = normalize_mobile(data.mobile)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid mobile number format")
+
+    code = "123456"
+    success, message = await sms_service.send_verification_code(normalized, code, "bind")
+
+    if success:
+        return {"success": True, "message": f"Test SMS sent to {normalized[:3]}****{normalized[-4:]}"}
+    else:
+        raise HTTPException(status_code=400, detail=message)
+
+
+# ─── Email Configuration ───────────────────────────────────
 
 
 @router.post("/system-email/test")
@@ -1260,8 +1293,14 @@ async def list_org_members(
         tenant_id = effective_tenant_id  # None only for true global admin
 
     query = (
-        select(OrgMember, IdentityProvider.name.label("provider_name"), IdentityProvider.provider_type)
+        select(
+            OrgMember,
+            IdentityProvider.name.label("provider_name"),
+            IdentityProvider.provider_type,
+            User.display_name.label("user_display_name"),
+        )
         .outerjoin(IdentityProvider, OrgMember.provider_id == IdentityProvider.id)
+        .outerjoin(User, OrgMember.user_id == User.id)
         .where(OrgMember.status == "active")
     )
     if tenant_id:
@@ -1309,9 +1348,117 @@ async def list_org_members(
             "provider_id": str(m.provider_id) if m.provider_id else None,
             "provider_name": provider_name if m.provider_id else None,
             "provider_type": provider_type if m.provider_id else None,
+            "user_id": str(m.user_id) if m.user_id else None,
+            "user_display_name": user_display_name,
+            "unionid": m.unionid,
+            "open_id": m.open_id,
+            "phone": m.phone,
         }
-        for m, provider_name, provider_type in rows
+        for m, provider_name, provider_type, user_display_name in rows
     ]
+
+
+@router.post("/org/members/{member_id}/bind-user")
+async def bind_org_member_to_user(
+    member_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bind an OrgMember to an existing User by matching email or phone."""
+    if current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        mid = uuid.UUID(member_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid member_id")
+
+    result = await db.execute(select(OrgMember).where(OrgMember.id == mid))
+    member = result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=404, detail="OrgMember not found")
+
+    if member.tenant_id and current_user.role != "platform_admin" and member.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot access other tenant's data")
+
+    if member.user_id:
+        raise HTTPException(status_code=400, detail="OrgMember is already bound to a user")
+
+    # Find user by email or phone in the same tenant
+    target_user_id = data.get("user_id")
+    if target_user_id:
+        try:
+            uid = uuid.UUID(target_user_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid user_id")
+        user_result = await db.execute(select(User).where(User.id == uid, User.tenant_id == member.tenant_id))
+        target_user = user_result.scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found in this tenant")
+    else:
+        # Auto-match by email or phone
+        target_user = None
+        if member.email:
+            user_result = await db.execute(
+                select(User).where(
+                    User.identity_id == select(Identity.id).where(Identity.email == member.email).scalar_subquery(),
+                    User.tenant_id == member.tenant_id,
+                )
+            )
+            target_user = user_result.scalar_one_or_none()
+        if not target_user and member.phone:
+            user_result = await db.execute(
+                select(User).where(
+                    User.identity_id == select(Identity.id).where(Identity.phone == member.phone).scalar_subquery(),
+                    User.tenant_id == member.tenant_id,
+                )
+            )
+            target_user = user_result.scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="No matching user found by email or phone")
+
+    member.user_id = target_user.id
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "member_id": str(member.id),
+        "user_id": str(target_user.id),
+        "user_name": target_user.display_name,
+    }
+
+
+@router.delete("/org/members/{member_id}/unbind")
+async def unbind_org_member(
+    member_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unbind an OrgMember from its User."""
+    if current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        mid = uuid.UUID(member_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid member_id")
+
+    result = await db.execute(select(OrgMember).where(OrgMember.id == mid))
+    member = result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=404, detail="OrgMember not found")
+
+    if member.tenant_id and current_user.role != "platform_admin" and member.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot access other tenant's data")
+
+    if not member.user_id:
+        raise HTTPException(status_code=400, detail="OrgMember is not bound to any user")
+
+    member.user_id = None
+    await db.commit()
+
+    return {"status": "ok", "member_id": str(member.id)}
 
 
 @router.post("/org/sync")

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../stores';
@@ -25,10 +25,23 @@ export default function Login() {
     const [ssoError, setSsoError] = useState('');
     const [tenantSelection, setTenantSelection] = useState<any[] | null>(null);
 
+    // Registration method: 'verification_code' or 'password'
+    const [registerMethod, setRegisterMethod] = useState<'verification_code' | 'password'>('verification_code');
+    // Contact type for verification code registration
+    const [registerContactType, setRegisterContactType] = useState<'email' | 'mobile'>('email');
+    // Verification code countdown timer
+    const [codeCountdown, setCodeCountdown] = useState(0);
+    const countdownTimerRef = useRef<number | null>(null);
+
     const [form, setForm] = useState({
         login_identifier: invitedEmail,  // Pre-fill invited email if present
         password: '',
         tenant_id: '',
+        // Verification code fields
+        register_contact: invitedEmail,
+        verification_code: '',
+        // Invitation code for registration
+        invitation_code_input: invitationCode || '',
     });
 
     useEffect(() => {
@@ -72,6 +85,15 @@ export default function Login() {
             .finally(() => setResolving(false));
     }, []);
 
+    // Countdown timer cleanup
+    useEffect(() => {
+        return () => {
+            if (countdownTimerRef.current) {
+                clearInterval(countdownTimerRef.current);
+            }
+        };
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
         if (!tenant?.sso_enabled || isRegister) {
@@ -107,6 +129,55 @@ export default function Login() {
         i18n.changeLanguage(i18n.language === 'zh' ? 'en' : 'zh');
     };
 
+    const handleSendVerificationCode = async () => {
+        const contact = form.register_contact.trim();
+        if (!contact) {
+            setError(registerContactType === 'email' 
+                ? t('auth.emailRequired', '请输入邮箱地址')
+                : t('auth.mobileRequired', '请输入手机号码'));
+            return;
+        }
+        
+        if (registerContactType === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
+            setError(t('auth.invalidEmail', '邮箱格式不正确'));
+            return;
+        }
+        
+        if (registerContactType === 'mobile' && !/^1[3-9]\d{9}$/.test(contact)) {
+            setError(t('auth.invalidMobile', '手机号码格式不正确'));
+            return;
+        }
+
+        setError('');
+        setLoading(true);
+        try {
+            const res = await authApi.sendVerificationCode({
+                contact: registerContactType === 'mobile' ? contact : contact.toLowerCase(),
+                channel: registerContactType,
+                purpose: 'register',
+            });
+            setSuccessMessage(res.message || t('auth.codeSent', '验证码已发送'));
+            
+            // Start countdown timer (60 seconds)
+            setCodeCountdown(60);
+            countdownTimerRef.current = window.setInterval(() => {
+                setCodeCountdown(prev => {
+                    if (prev <= 1) {
+                        if (countdownTimerRef.current) {
+                            clearInterval(countdownTimerRef.current);
+                        }
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        } catch (err: any) {
+            setError(err.message || t('auth.codeSendFailed', '验证码发送失败'));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
@@ -115,23 +186,85 @@ export default function Login() {
 
         try {
             if (isRegister) {
+                // Handle verification code registration
+                if (registerMethod === 'verification_code') {
+                    const contact = form.register_contact.trim();
+                    const code = form.verification_code.trim();
+                    const inviteCode = form.invitation_code_input.trim();
+                    
+                    if (!contact) {
+                        setError(registerContactType === 'email' 
+                            ? t('auth.emailRequired', '请输入邮箱地址')
+                            : t('auth.mobileRequired', '请输入手机号码'));
+                        setLoading(false);
+                        return;
+                    }
+                    
+                    if (!code) {
+                        setError(t('auth.codeRequired', '请输入验证码'));
+                        setLoading(false);
+                        return;
+                    }
+
+                    if (!inviteCode) {
+                        setError(t('auth.invitationCodeRequired', '请输入企业邀请码'));
+                        setLoading(false);
+                        return;
+                    }
+
+                    // First verify the code
+                    await authApi.verifyCode({
+                        contact: registerContactType === 'mobile' ? contact : contact.toLowerCase(),
+                        channel: registerContactType,
+                        purpose: 'register',
+                        code: code,
+                    });
+
+                    // Then register with the verified contact
+                    const regRes = await authApi.register({
+                        username: registerContactType === 'email' 
+                            ? contact.split('@')[0] 
+                            : `user_${contact.slice(-4)}`,
+                        email: registerContactType === 'email' ? contact.toLowerCase() : '',
+                        password: '',  // Will be set later in profile setup
+                        display_name: registerContactType === 'email' 
+                            ? contact.split('@')[0] 
+                            : contact.slice(-4),
+                        ...(registerContactType === 'mobile' ? { mobile: contact } : {}),
+                        invitation_code: inviteCode,
+                        verification_code: code,
+                        contact_type: registerContactType,
+                    });
+                    
+                    if (regRes.access_token && regRes.user) {
+                        setAuth(regRes.user, regRes.access_token);
+                    }
+                    // After joining via invitation code, go to home (no company setup needed)
+                    navigate('/');
+                    return;
+                }
+                
+                // Handle password registration (legacy flow - still requires invitation code)
+                const inviteCode = form.invitation_code_input.trim();
+                if (!inviteCode) {
+                    setError(t('auth.invitationCodeRequired', '请输入企业邀请码'));
+                    setLoading(false);
+                    return;
+                }
+                
                 const regRes = await authApi.register({
                     username: form.login_identifier.split('@')[0],
                     email: form.login_identifier,
                     password: form.password,
                     display_name: form.login_identifier.split('@')[0],
-                    ...(invitationCode ? { invitation_code: invitationCode } : {})
+                    invitation_code: inviteCode,
                 });
                 // Save authentication state for company selection (user not active yet)
                 if (regRes.access_token && regRes.user) {
                     setAuth(regRes.user, regRes.access_token);
                 }
-                // Redirect based on whether company setup is needed
-                if (regRes.needs_company_setup === false) {
-                    navigate('/verify-email', { state: { fromRegister: true, email: regRes.email } });
-                } else {
-                    navigate('/setup-company', { state: { fromRegister: true, email: regRes.email } });
-                }
+                // After joining via invitation code, go to home (no company setup needed)
+                navigate('/');
                 return;
             } else {
                 const res = await authApi.login({
@@ -435,37 +568,198 @@ export default function Login() {
                     )}
 
                     <form onSubmit={handleSubmit} className="login-form">
-                        <div className="login-field">
-                            <label>{t('auth.email')}</label>
-                            <input
-                                type="email"
-                                value={form.login_identifier}
-                                onChange={(e) => setForm({ ...form, login_identifier: e.target.value })}
-                                required
-                                autoFocus
-                                placeholder={t('auth.emailPlaceholder')}
-                            />
-                        </div>
+                        {isRegister && registerMethod === 'verification_code' && (
+                            <>
+                                {/* Contact type toggle */}
+                                <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
+                                    <button
+                                        type="button"
+                                        className={`btn ${registerContactType === 'email' ? 'btn-primary' : 'btn-secondary'}`}
+                                        style={{ fontSize: '13px', padding: '8px 16px', flex: 1 }}
+                                        onClick={() => {
+                                            setRegisterContactType('email');
+                                            setForm(f => ({ ...f, register_contact: '' }));
+                                        }}
+                                    >
+                                        {t('auth.useEmail', '邮箱注册')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`btn ${registerContactType === 'mobile' ? 'btn-primary' : 'btn-secondary'}`}
+                                        style={{ fontSize: '13px', padding: '8px 16px', flex: 1 }}
+                                        onClick={() => {
+                                            setRegisterContactType('mobile');
+                                            setForm(f => ({ ...f, register_contact: '' }));
+                                        }}
+                                    >
+                                        {t('auth.useMobile', '手机注册')}
+                                    </button>
+                                </div>
 
-                        <div className="login-field">
-                            <label>{t('auth.password')}</label>
-                            <input
-                                type="password"
-                                value={form.password}
-                                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                                required
-                                placeholder={t('auth.passwordPlaceholder')}
-                            />
-                        </div>
+                                {/* Contact input */}
+                                <div className="login-field">
+                                    <label>{registerContactType === 'email' ? t('auth.email') : t('auth.mobile', '手机号码')}</label>
+                                    <input
+                                        type={registerContactType === 'email' ? 'email' : 'tel'}
+                                        value={form.register_contact}
+                                        onChange={(e) => setForm({ ...form, register_contact: e.target.value })}
+                                        required
+                                        autoFocus
+                                        placeholder={registerContactType === 'email' 
+                                            ? t('auth.emailPlaceholder', '请输入邮箱地址')
+                                            : t('auth.mobilePlaceholder', '请输入手机号码')
+                                        }
+                                    />
+                                </div>
+
+                                {/* Verification code */}
+                                <div className="login-field">
+                                    <label>{t('auth.verificationCode', '验证码')}</label>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <input
+                                            type="text"
+                                            value={form.verification_code}
+                                            onChange={(e) => setForm({ ...form, verification_code: e.target.value })}
+                                            required
+                                            placeholder={t('auth.codePlaceholder', '请输入验证码')}
+                                            style={{ flex: 1 }}
+                                            maxLength={6}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            style={{ fontSize: '13px', padding: '0 12px', minWidth: '100px' }}
+                                            onClick={handleSendVerificationCode}
+                                            disabled={codeCountdown > 0 || loading}
+                                        >
+                                            {codeCountdown > 0 
+                                                ? `${codeCountdown}s` 
+                                                : t('auth.sendCode', '发送验证码')
+                                            }
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Invitation code - required for new identity system */}
+                                <div className="login-field">
+                                    <label>{t('auth.invitationCode', '邀请码')} <span style={{ color: 'var(--error)' }}>*</span></label>
+                                    <input
+                                        type="text"
+                                        value={form.invitation_code_input}
+                                        onChange={(e) => setForm({ ...form, invitation_code_input: e.target.value.toUpperCase() })}
+                                        required
+                                        placeholder={t('auth.invitationCodePlaceholder', '请输入企业邀请码')}
+                                        style={{ textTransform: 'uppercase', letterSpacing: '2px', fontFamily: 'monospace' }}
+                                    />
+                                    {!tenant && (
+                                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                                            {t('auth.invitationCodeHint', '注册需要企业邀请码，请联系企业管理员获取')}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        {isRegister && registerMethod === 'password' && (
+                            <>
+                                <div className="login-field">
+                                    <label>{t('auth.email')}</label>
+                                    <input
+                                        type="email"
+                                        value={form.login_identifier}
+                                        onChange={(e) => setForm({ ...form, login_identifier: e.target.value })}
+                                        required
+                                        autoFocus
+                                        placeholder={t('auth.emailPlaceholder')}
+                                    />
+                                </div>
+
+                                <div className="login-field">
+                                    <label>{t('auth.password')}</label>
+                                    <input
+                                        type="password"
+                                        value={form.password}
+                                        onChange={(e) => setForm({ ...form, password: e.target.value })}
+                                        required
+                                        placeholder={t('auth.passwordPlaceholder')}
+                                    />
+                                </div>
+
+                                {/* Invitation code for password registration */}
+                                <div className="login-field">
+                                    <label>{t('auth.invitationCode', '邀请码')} <span style={{ color: 'var(--error)' }}>*</span></label>
+                                    <input
+                                        type="text"
+                                        value={form.invitation_code_input}
+                                        onChange={(e) => setForm({ ...form, invitation_code_input: e.target.value.toUpperCase() })}
+                                        required
+                                        placeholder={t('auth.invitationCodePlaceholder', '请输入企业邀请码')}
+                                        style={{ textTransform: 'uppercase', letterSpacing: '2px', fontFamily: 'monospace' }}
+                                    />
+                                </div>
+                            </>
+                        )}
 
                         {!isRegister && (
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-4px', marginBottom: '8px' }}>
-                                <Link
-                                    to="/forgot-password"
-                                    style={{ fontSize: '13px', color: 'var(--accent-primary)', textDecoration: 'none' }}
+                            <>
+                                <div className="login-field">
+                                    <label>{t('auth.email')}</label>
+                                    <input
+                                        type="email"
+                                        value={form.login_identifier}
+                                        onChange={(e) => setForm({ ...form, login_identifier: e.target.value })}
+                                        required
+                                        autoFocus
+                                        placeholder={t('auth.emailPlaceholder')}
+                                    />
+                                </div>
+
+                                <div className="login-field">
+                                    <label>{t('auth.password')}</label>
+                                    <input
+                                        type="password"
+                                        value={form.password}
+                                        onChange={(e) => setForm({ ...form, password: e.target.value })}
+                                        required
+                                        placeholder={t('auth.passwordPlaceholder')}
+                                    />
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-4px', marginBottom: '8px' }}>
+                                    <Link
+                                        to="/forgot-password"
+                                        style={{ fontSize: '13px', color: 'var(--accent-primary)', textDecoration: 'none' }}
+                                    >
+                                        {t('auth.forgotPassword', 'Forgot password?')}
+                                    </Link>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Registration method toggle */}
+                        {isRegister && (
+                            <div style={{ marginTop: '8px', textAlign: 'center' }}>
+                                <button
+                                    type="button"
+                                    style={{ 
+                                        fontSize: '12px', 
+                                        color: 'var(--text-tertiary)', 
+                                        background: 'transparent', 
+                                        border: 'none', 
+                                        cursor: 'pointer',
+                                        textDecoration: 'underline',
+                                    }}
+                                    onClick={() => {
+                                        setRegisterMethod(registerMethod === 'verification_code' ? 'password' : 'verification_code');
+                                        setError('');
+                                        setSuccessMessage('');
+                                    }}
                                 >
-                                    {t('auth.forgotPassword', 'Forgot password?')}
-                                </Link>
+                                    {registerMethod === 'verification_code' 
+                                        ? t('auth.usePasswordRegister', '使用密码注册')
+                                        : t('auth.useCodeRegister', '使用验证码注册')
+                                    }
+                                </button>
                             </div>
                         )}
 

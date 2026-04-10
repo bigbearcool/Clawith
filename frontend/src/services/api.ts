@@ -18,7 +18,8 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
         const isAuthEndpoint = url.startsWith('/auth/login')
             || url.startsWith('/auth/register')
             || url.startsWith('/auth/forgot-password')
-            || url.startsWith('/auth/reset-password');
+            || url.startsWith('/auth/reset-password')
+            || url.startsWith('/auth/sso/bind');
         if (res.status === 401 && !isAuthEndpoint) {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
@@ -152,7 +153,7 @@ export function uploadFileWithProgress(
 
 // ─── Auth ─────────────────────────────────────────────
 export const authApi = {
-    register: (data: { username?: string; email: string; password: string; display_name: string; invitation_code?: string; provider?: string; provider_code?: string }) =>
+    register: (data: { username?: string; email?: string; password: string; display_name: string; invitation_code?: string; provider?: string; provider_code?: string; verification_code?: string; contact_type?: 'email' | 'mobile'; mobile?: string }) =>
         request<{ user_id: string; email: string; access_token: string; message: string; user?: any; needs_company_setup: boolean }>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
 
     login: (data: { login_identifier: string; password: string; tenant_id?: string }) =>
@@ -183,6 +184,34 @@ export const authApi = {
 
     switchTenant: (tenantId: string) =>
         request<{ access_token: string; redirect_url?: string; message?: string }>('/auth/switch-tenant', { method: 'POST', body: JSON.stringify({ tenant_id: tenantId }) }),
+
+    // Verification code APIs
+    sendVerificationCode: (data: { contact: string; channel: 'email' | 'mobile'; purpose: 'register' | 'bind' | 'reset_password' | 'login' }) =>
+        request<{ success: boolean; message: string }>('/auth/send-code', { method: 'POST', body: JSON.stringify(data) }),
+
+    verifyCode: (data: { contact: string; channel: 'email' | 'mobile'; purpose: string; code: string }) =>
+        request<{ success: boolean; message: string }>('/auth/verify-code', { method: 'POST', body: JSON.stringify(data) }),
+
+    // Contact management APIs
+    getMyContacts: () =>
+        request<any[]>('/auth/contacts'),
+
+    addContact: (data: { contact_type: 'email' | 'mobile'; contact: string; code: string }) =>
+        request<{ ok: boolean; message: string; contact_id: string }>('/auth/contacts', { method: 'POST', body: JSON.stringify(data) }),
+
+    removeContact: (contactId: string) =>
+        request<{ ok: boolean }>(`/auth/contacts/${contactId}`, { method: 'DELETE' }),
+
+    setPrimaryContact: (contactId: string) =>
+        request<{ ok: boolean }>(`/auth/contacts/${contactId}/set-primary`, { method: 'PUT' }),
+
+    // Login configuration (check if user needs to select tenant)
+    getLoginConfig: (loginIdentifier: string) =>
+        request<{ identifier_type: 'email' | 'mobile' | 'username'; tenants: any[]; requires_selection: boolean }>(`/auth/login-config?identifier=${encodeURIComponent(loginIdentifier)}`),
+
+    // Tenant selection for login
+    selectTenantForLogin: (data: { login_identifier: string; tenant_id: string }) =>
+        request<{ session_token: string }>('/auth/select-tenant', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // ─── Tenants ──────────────────────────────────────────

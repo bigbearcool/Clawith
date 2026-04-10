@@ -39,6 +39,8 @@ dependencies = [
     "pypinyin>=0.52.0",
     "anyascii>=0.3.2",
     "Pillow>=10.0.0",
+    "alibabacloud-dysmsapi20170525>=2.0.0",
+    "tencentcloud-sdk-python>=3.0.0",
 ]
 
 [project.optional-dependencies]

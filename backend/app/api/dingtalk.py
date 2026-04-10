@@ -22,6 +22,7 @@ router = APIRouter(tags=["dingtalk"])
 
 # ─── Config CRUD ────────────────────────────────────────
 
+
 @router.post("/agents/{agent_id}/dingtalk-channel", response_model=ChannelConfigOut, status_code=201)
 async def configure_dingtalk_channel(
     agent_id: uuid.UUID,
@@ -57,18 +58,20 @@ async def configure_dingtalk_channel(
         existing.is_configured = True
         existing.extra_config = {**existing.extra_config, "connection_mode": conn_mode, "agent_id": dingtalk_agent_id}
         await db.flush()
-        
+
         # Restart Stream client if in websocket mode
         if conn_mode == "websocket":
             from app.services.dingtalk_stream import dingtalk_stream_manager
             import asyncio
+
             asyncio.create_task(dingtalk_stream_manager.start_client(agent_id, app_key, app_secret))
         else:
             # Stop existing Stream client if switched to webhook
             from app.services.dingtalk_stream import dingtalk_stream_manager
             import asyncio
+
             asyncio.create_task(dingtalk_stream_manager.stop_client(agent_id))
-            
+
         return ChannelConfigOut.model_validate(existing)
 
     config = ChannelConfig(
@@ -86,6 +89,7 @@ async def configure_dingtalk_channel(
     if conn_mode == "websocket":
         from app.services.dingtalk_stream import dingtalk_stream_manager
         import asyncio
+
         asyncio.create_task(dingtalk_stream_manager.start_client(agent_id, app_key, app_secret))
 
     return ChannelConfigOut.model_validate(config)
@@ -133,10 +137,12 @@ async def delete_dingtalk_channel(
     # Stop Stream client
     from app.services.dingtalk_stream import dingtalk_stream_manager
     import asyncio
+
     asyncio.create_task(dingtalk_stream_manager.stop_client(agent_id))
 
 
 # ─── Message Processing (called by Stream callback) ────
+
 
 async def process_dingtalk_message(
     agent_id: uuid.UUID,
@@ -167,7 +173,10 @@ async def process_dingtalk_message(
             return
         creator_id = agent_obj.creator_id
         from app.models.agent import DEFAULT_CONTEXT_WINDOW_SIZE
-        ctx_size = (agent_obj.context_window_size or DEFAULT_CONTEXT_WINDOW_SIZE) if agent_obj else DEFAULT_CONTEXT_WINDOW_SIZE
+
+        ctx_size = (
+            (agent_obj.context_window_size or DEFAULT_CONTEXT_WINDOW_SIZE) if agent_obj else DEFAULT_CONTEXT_WINDOW_SIZE
+        )
 
         # Determine conv_id for session isolation
         if conversation_type == "2":
@@ -208,56 +217,75 @@ async def process_dingtalk_message(
         history = [{"role": m.role, "content": m.content} for m in reversed(history_r.scalars().all())]
 
         # Save user message
-        db.add(ChatMessage(
-            agent_id=agent_id, user_id=platform_user_id,
-            role="user", content=user_text,
-            conversation_id=session_conv_id,
-        ))
+        db.add(
+            ChatMessage(
+                agent_id=agent_id,
+                user_id=platform_user_id,
+                role="user",
+                content=user_text,
+                conversation_id=session_conv_id,
+            )
+        )
         sess.last_message_at = datetime.now(timezone.utc)
         await db.commit()
 
         # Call LLM
         reply_text = await _call_agent_llm(
-            db, agent_id, user_text,
-            history=history, user_id=platform_user_id,
+            db,
+            agent_id,
+            user_text,
+            history=history,
+            user_id=platform_user_id,
         )
         logger.info(f"[DingTalk] LLM reply: {reply_text[:100]}")
 
         # Reply via session webhook (markdown)
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                await client.post(session_webhook, json={
-                    "msgtype": "markdown",
-                    "markdown": {
-                        "title": agent_obj.name or "AI Reply",
-                        "text": reply_text,
+                await client.post(
+                    session_webhook,
+                    json={
+                        "msgtype": "markdown",
+                        "markdown": {
+                            "title": agent_obj.name or "AI Reply",
+                            "text": reply_text,
+                        },
                     },
-                })
+                )
         except Exception as e:
             logger.error(f"[DingTalk] Failed to reply via webhook: {e}")
             # Fallback: try plain text
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
-                    await client.post(session_webhook, json={
-                        "msgtype": "text",
-                        "text": {"content": reply_text},
-                    })
+                    await client.post(
+                        session_webhook,
+                        json={
+                            "msgtype": "text",
+                            "text": {"content": reply_text},
+                        },
+                    )
             except Exception as e2:
                 logger.error(f"[DingTalk] Fallback text reply also failed: {e2}")
 
         # Save assistant reply
-        db.add(ChatMessage(
-            agent_id=agent_id, user_id=platform_user_id,
-            role="assistant", content=reply_text,
-            conversation_id=session_conv_id,
-        ))
+        db.add(
+            ChatMessage(
+                agent_id=agent_id,
+                user_id=platform_user_id,
+                role="assistant",
+                content=reply_text,
+                conversation_id=session_conv_id,
+            )
+        )
         sess.last_message_at = datetime.now(timezone.utc)
         await db.commit()
 
         # Log activity
         from app.services.activity_logger import log_activity
+
         await log_activity(
-            agent_id, "chat_reply",
+            agent_id,
+            "chat_reply",
             f"Replied to DingTalk message: {reply_text[:80]}",
             detail={"channel": "dingtalk", "user_text": user_text[:200], "reply": reply_text[:500]},
         )
@@ -265,9 +293,10 @@ async def process_dingtalk_message(
 
 # ─── OAuth Callback (SSO) ──────────────────────────────
 
+
 @router.get("/auth/dingtalk/callback")
 async def dingtalk_callback(
-    authCode: str, # DingTalk uses authCode parameter
+    authCode: str,  # DingTalk uses authCode parameter
     state: str = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -320,6 +349,38 @@ async def dingtalk_callback(
         logger.error(f"DingTalk login error: {e}")
         return HTMLResponse(f"Auth failed: {str(e)}")
 
+    # Check if user needs to bind contact (new identity system)
+    from app.models.user import Identity
+    from app.config import get_settings
+
+    settings = get_settings()
+    needs_binding = False
+    suggested_email = None
+    suggested_mobile = None
+    if settings.FEATURE_NEW_IDENTITY_SYSTEM:
+        if user.identity_id:
+            result = await db.execute(select(Identity).where(Identity.id == user.identity_id))
+            identity = result.scalar_one_or_none()
+            if identity:
+                # Filter out virtual emails (e.g., xxx@dingtalk.local)
+                real_email = identity.email if identity.email and not identity.email.endswith(".local") else None
+                real_phone = identity.phone
+
+                has_verified_contact = (real_email and identity.email_verified) or (
+                    real_phone and identity.phone_verified
+                )
+                if not has_verified_contact:
+                    needs_binding = True
+                    # Only suggest real contacts from SSO provider
+                    suggested_email = (
+                        user_info.email if user_info.email and not user_info.email.endswith(".local") else None
+                    )
+                    suggested_mobile = user_info.mobile
+        else:
+            needs_binding = True
+            suggested_email = user_info.email if user_info.email and not user_info.email.endswith(".local") else None
+            suggested_mobile = user_info.mobile
+
     # 4. Standard login
     token = create_access_token(str(user.id), user.role)
 
@@ -329,17 +390,30 @@ async def dingtalk_callback(
             s_res = await db.execute(select(SSOScanSession).where(SSOScanSession.id == sid))
             session = s_res.scalar_one_or_none()
             if session:
-                session.status = "authorized"
+                if needs_binding:
+                    session.status = "needs_binding"
+                else:
+                    session.status = "authorized"
                 session.provider_type = "dingtalk"
                 session.user_id = user.id
                 session.access_token = token
                 session.error_msg = None
                 await db.commit()
+
+                if needs_binding:
+                    redirect_url = f"/sso-bind?token={sid}&provider=dingtalk"
+                    if suggested_mobile:
+                        redirect_url += f"&mobile={suggested_mobile}"
+                    if suggested_email:
+                        redirect_url += f"&email={suggested_email}"
+                else:
+                    redirect_url = f"/sso/entry?sid={sid}&complete=1"
+
                 return HTMLResponse(
                     f"""<html><head><meta charset="utf-8" /></head>
                     <body style="font-family: sans-serif; padding: 24px;">
                         <div>SSO login successful. Redirecting...</div>
-                        <script>window.location.href = "/sso/entry?sid={sid}&complete=1";</script>
+                        <script>window.location.href = "{redirect_url}";</script>
                     </body></html>"""
                 )
         except Exception as e:

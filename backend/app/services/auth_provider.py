@@ -332,6 +332,7 @@ class FeishuAuthProvider(BaseAuthProvider):
                 provider_union_id=info_data.get("union_id"),
                 name=info_data.get("name", ""),
                 email=info_data.get("email", ""),
+                mobile=info_data.get("mobile", ""),
                 avatar_url=info_data.get("avatar_url", ""),
                 raw_data=info_data,
             )

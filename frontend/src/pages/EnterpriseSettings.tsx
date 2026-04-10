@@ -407,6 +407,13 @@ function OrgTab({ tenant }: { tenant: any }) {
     const [savingProvider, setSavingProvider] = useState(false);
     const [saveProviderOk, setSaveProviderOk] = useState(false);
 
+    // OrgMember bind/unbind state
+    const [bindDialogOpen, setBindDialogOpen] = useState(false);
+    const [bindMember, setBindMember] = useState<any>(null);
+    const [bindSearch, setBindSearch] = useState('');
+    const [bindUsers, setBindUsers] = useState<any[]>([]);
+    const [binding, setBinding] = useState(false);
+
     // Identity Providers state
     const [editingId, setEditingId] = useState<string | null>(null);
     const [useOAuth2Form, setUseOAuth2Form] = useState(false);
@@ -514,6 +521,52 @@ function OrgTab({ tenant }: { tenant: any }) {
             setSyncResult({ error: e.message, providerId });
         }
         setSyncing(null);
+    };
+
+    // Bind/unbind OrgMember to User
+    const openBindDialog = async (member: any) => {
+        setBindMember(member);
+        setBindSearch('');
+        setBindDialogOpen(true);
+        // Fetch users in same tenant
+        try {
+            const params = new URLSearchParams();
+            if (currentTenantId) params.set('tenant_id', currentTenantId);
+            const users = await fetchJson<any[]>(`/users/?${params}`);
+            setBindUsers(users);
+        } catch (e: any) {
+            console.error('Failed to fetch users:', e);
+            setBindUsers([]);
+        }
+    };
+
+    const handleBind = async (userId: string) => {
+        if (!bindMember) return;
+        setBinding(true);
+        try {
+            await fetchJson(`/enterprise/org/members/${bindMember.id}/bind-user`, {
+                method: 'POST',
+                body: JSON.stringify({ user_id: userId }),
+            });
+            setBindDialogOpen(false);
+            setBindMember(null);
+            qc.invalidateQueries({ queryKey: ['org-members'] });
+        } catch (e: any) {
+            alert(e.message || 'Failed to bind member');
+        }
+        setBinding(false);
+    };
+
+    const handleUnbind = async (memberId: string) => {
+        if (!confirm('Unbind this member from their user?')) return;
+        try {
+            await fetchJson(`/enterprise/org/members/${memberId}/unbind`, {
+                method: 'DELETE',
+            });
+            qc.invalidateQueries({ queryKey: ['org-members'] });
+        } catch (e: any) {
+            alert(e.message || 'Failed to unbind member');
+        }
     };
 
     const initOAuth2FromConfig = (config: any) => ({
@@ -800,6 +853,40 @@ function OrgTab({ tenant }: { tenant: any }) {
     };
 
     const renderOrgBrowser = (p: any) => {
+        // Group members by user_id
+        const boundMembers: Map<string, any[]> = new Map();
+        const unboundMembers: any[] = [];
+
+        members.forEach((m: any) => {
+            if (m.user_id) {
+                const uid = m.user_id;
+                if (!boundMembers.has(uid)) boundMembers.set(uid, []);
+                boundMembers.get(uid)!.push(m);
+            } else {
+                unboundMembers.push(m);
+            }
+        });
+
+        const providerTypeBadge = (type: string) => {
+            const colors: Record<string, string> = {
+                feishu: '#3370FF',
+                wecom: '#2BAE67',
+                dingtalk: '#0089FF',
+            };
+            return (
+                <span style={{
+                    padding: '1px 6px',
+                    borderRadius: '3px',
+                    fontSize: '10px',
+                    background: `${colors[type] || '#666'}20`,
+                    color: colors[type] || '#666',
+                    fontWeight: 500,
+                }}>
+                    {type}
+                </span>
+            );
+        };
+
         return (
             <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px dashed var(--border-subtle)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
@@ -818,7 +905,6 @@ function OrgTab({ tenant }: { tenant: any }) {
                                     : `Sync complete: ${syncResult.departments || 0} depts, ${syncResult.members || 0} members synced.`}
                                 {syncResult.errors && syncResult.errors.length > 0 && (
                                     <div style={{ marginTop: '4px', color: 'var(--color-warning, #f90)' }}>
-                                        {/* Show first error to help diagnose permission issues */}
                                         {`Warning: ${syncResult.errors[0]}`}
                                         {syncResult.errors.length > 1 && ` (+${syncResult.errors.length - 1} more)`}
                                     </div>
@@ -827,7 +913,6 @@ function OrgTab({ tenant }: { tenant: any }) {
                         )}
                     </div>
                 </div>
-
 
                 <div style={{ display: 'flex', gap: '16px' }}>
                     <div style={{ width: '260px', borderRight: '1px solid var(--border-subtle)', paddingRight: '16px', maxHeight: '500px', overflowY: 'auto' }}>
@@ -840,23 +925,121 @@ function OrgTab({ tenant }: { tenant: any }) {
 
                     <div style={{ flex: 1 }}>
                         <input className="form-input" placeholder={t("enterprise.org.searchMembers")} value={memberSearch} onChange={e => setMemberSearch(e.target.value)} style={{ marginBottom: '12px' }} />
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '400px', overflowY: 'auto' }}>
-                            {members.map((m: any) => (
-                                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-                                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }}>{m.name?.[0]}</div>
-                                    <div>
-                                        <div style={{ fontWeight: 500, fontSize: '13px' }}>{m.name}</div>
-                                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                                            {m.provider_type && <span style={{ marginRight: '4px', padding: '1px 4px', borderRadius: '3px', background: 'var(--bg-secondary)', fontSize: '10px' }}>{m.provider_type}</span>}
-                                            {m.title || '-'} · {m.department_path || m.department_id || '-'}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
+                            {/* Bound members grouped by user */}
+                            {Array.from(boundMembers.entries()).map(([userId, userMembers]) => {
+                                const first = userMembers[0];
+                                const displayName = first.user_display_name || first.name;
+                                return (
+                                    <div key={userId} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }}>{displayName?.[0]}</div>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 500, fontSize: '13px' }}>{displayName}</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                                    {first.email || first.phone || 'No contact info'}
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '4px' }}>
+                                                {userMembers.map((m: any) => providerTypeBadge(m.provider_type))}
+                                            </div>
+                                            <button className="btn btn-sm" style={{ fontSize: '10px', padding: '2px 8px' }} onClick={() => handleUnbind(first.id)}>
+                                                Unbind
+                                            </button>
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', paddingLeft: '42px' }}>
+                                            {userMembers.map((m: any) => `${m.title || '-'} · ${m.department_path || '-'}`).join(' | ')}
                                         </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
+
+                            {/* Unbound members */}
+                            {unboundMembers.length > 0 && (
+                                <>
+                                    <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)', marginTop: '8px' }}>
+                                        Unbound Members ({unboundMembers.length})
+                                    </div>
+                                    {unboundMembers.map((m: any) => (
+                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px', borderRadius: '6px', border: '1px dashed var(--border-subtle)' }}>
+                                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }}>{m.name?.[0]}</div>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 500, fontSize: '13px' }}>{m.name}</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                                    {providerTypeBadge(m.provider_type)}
+                                                    {m.title || '-'} · {m.department_path || '-'}
+                                                </div>
+                                            </div>
+                                            <button className="btn btn-secondary btn-sm" style={{ fontSize: '10px', padding: '2px 8px' }} onClick={() => openBindDialog(m)}>
+                                                Bind to User
+                                            </button>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
                             {members.length === 0 && <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-tertiary)' }}>{t('enterprise.org.noMembers')}</div>}
                         </div>
                     </div>
                 </div>
+
+                {/* Bind Dialog */}
+                {bindDialogOpen && bindMember && (
+                    <div style={{
+                        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 1000,
+                    }} onClick={() => setBindDialogOpen(false)}>
+                        <div style={{
+                            background: 'var(--bg-primary)', borderRadius: '12px', padding: '24px',
+                            width: '400px', maxHeight: '500px', display: 'flex', flexDirection: 'column',
+                        }} onClick={e => e.stopPropagation()}>
+                            <h4 style={{ margin: '0 0 16px', fontSize: '16px' }}>
+                                Bind {bindMember.name} to User
+                            </h4>
+                            <input
+                                className="form-input"
+                                placeholder="Search users..."
+                                value={bindSearch}
+                                onChange={e => setBindSearch(e.target.value)}
+                                style={{ marginBottom: '12px' }}
+                            />
+                            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {bindUsers
+                                    .filter((u: any) =>
+                                        !bindSearch ||
+                                        u.display_name?.toLowerCase().includes(bindSearch.toLowerCase()) ||
+                                        u.email?.toLowerCase().includes(bindSearch.toLowerCase())
+                                    )
+                                    .map((u: any) => (
+                                        <div
+                                            key={u.id}
+                                            style={{
+                                                padding: '8px 12px', borderRadius: '6px', cursor: 'pointer',
+                                                border: '1px solid var(--border-subtle)',
+                                            }}
+                                            onClick={() => handleBind(u.id)}
+                                        >
+                                            <div style={{ fontWeight: 500, fontSize: '13px' }}>{u.display_name || u.username || 'Unnamed'}</div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                                {u.email || 'No email'} {u.primary_mobile ? `· ${u.primary_mobile}` : ''}
+                                            </div>
+                                        </div>
+                                    ))}
+                                {bindUsers.length === 0 && (
+                                    <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-tertiary)' }}>
+                                        No users found
+                                    </div>
+                                )}
+                            </div>
+                            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                                <button className="btn btn-secondary" onClick={() => setBindDialogOpen(false)}>
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     };

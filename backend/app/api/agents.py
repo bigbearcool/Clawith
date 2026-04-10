@@ -867,3 +867,176 @@ async def list_gateway_messages(
             }
         )
     return out
+
+
+# ─── Agent ↔ User Relationships ────────────────────────
+
+
+@router.get("/{agent_id}/relationships")
+async def list_agent_relationships(
+    agent_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all user relationships for an agent."""
+    agent, _access = await check_agent_access(db, current_user, agent_id)
+
+    from app.models.org import AgentRelationship
+
+    result = await db.execute(
+        select(AgentRelationship, User)
+        .join(User, AgentRelationship.user_id == User.id)
+        .where(AgentRelationship.agent_id == agent_id)
+    )
+    rows = result.all()
+
+    return [
+        {
+            "id": str(rel.id),
+            "user_id": str(rel.user_id),
+            "member_id": str(rel.user_id),  # Backward compatibility
+            "relation": rel.relation,
+            "relation_label": rel.relation,
+            "description": rel.description,
+            "created_at": rel.created_at.isoformat() if rel.created_at else None,
+            "member": {
+                "name": user.display_name or user.username or "Unnamed",
+                "email": user.email,
+                "phone": user.primary_mobile,
+                "department_path": user.title or "",
+            },
+        }
+        for rel, user in rows
+    ]
+
+
+@router.put("/{agent_id}/relationships")
+async def update_agent_relationships(
+    agent_id: uuid.UUID,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace all user relationships for an agent."""
+    agent, _access = await check_agent_access(db, current_user, agent_id)
+    if not is_agent_creator(current_user, agent) and current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=403, detail="Only creator or admin can manage relationships")
+
+    from app.models.org import AgentRelationship
+    from sqlalchemy import delete as sql_delete
+
+    relationships = data.get("relationships", [])
+    # Delete existing relationships
+    await db.execute(sql_delete(AgentRelationship).where(AgentRelationship.agent_id == agent_id))
+
+    # Insert new relationships
+    for rel_data in relationships:
+        user_id_str = rel_data.get("user_id") or rel_data.get("member_id")
+        if not user_id_str:
+            continue
+        try:
+            user_id = uuid.UUID(user_id_str)
+        except Exception:
+            continue
+
+        rel = AgentRelationship(
+            agent_id=agent_id,
+            user_id=user_id,
+            relation=rel_data.get("relation", "collaborator"),
+            description=rel_data.get("description", ""),
+        )
+        db.add(rel)
+
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/{agent_id}/relationships")
+async def add_agent_relationship(
+    agent_id: uuid.UUID,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a user relationship to an agent."""
+    agent, _access = await check_agent_access(db, current_user, agent_id)
+    if not is_agent_creator(current_user, agent) and current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=403, detail="Only creator or admin can manage relationships")
+
+    from app.models.org import AgentRelationship
+
+    user_id_str = data.get("user_id")
+    if not user_id_str:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    try:
+        user_id = uuid.UUID(user_id_str)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    # Verify user exists and is in same tenant
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    target_user = user_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if agent.tenant_id and target_user.tenant_id != agent.tenant_id:
+        raise HTTPException(status_code=400, detail="User must be in the same tenant as the agent")
+
+    # Check if relationship already exists
+    existing = await db.execute(
+        select(AgentRelationship).where(
+            AgentRelationship.agent_id == agent_id,
+            AgentRelationship.user_id == user_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Relationship already exists")
+
+    relation = data.get("relation", "collaborator")
+    description = data.get("description", "")
+
+    rel = AgentRelationship(
+        agent_id=agent_id,
+        user_id=user_id,
+        relation=relation,
+        description=description,
+    )
+    db.add(rel)
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "user_id": str(user_id),
+        "relation": relation,
+    }
+
+
+@router.delete("/{agent_id}/relationships/{rel_id}")
+async def remove_agent_relationship(
+    agent_id: uuid.UUID,
+    rel_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a user relationship from an agent."""
+    agent, _access = await check_agent_access(db, current_user, agent_id)
+    if not is_agent_creator(current_user, agent) and current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=403, detail="Only creator or admin can manage relationships")
+
+    from app.models.org import AgentRelationship
+
+    result = await db.execute(
+        select(AgentRelationship).where(
+            AgentRelationship.agent_id == agent_id,
+            AgentRelationship.id == rel_id,
+        )
+    )
+    rel = result.scalar_one_or_none()
+    if not rel:
+        raise HTTPException(status_code=404, detail="Relationship not found")
+
+    await db.delete(rel)
+    await db.commit()
+
+    return {"status": "ok", "relationship_id": str(rel_id)}

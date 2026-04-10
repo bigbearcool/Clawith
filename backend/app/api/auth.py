@@ -1,8 +1,9 @@
 """Authentication API routes."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -11,20 +12,81 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
 from app.database import get_db
 from app.models.user import User, Identity
+from app.models.identity import IdentityProvider
 from app.schemas.schemas import (
+    AddContactRequest,
+    ContactOut,
     IdentityBindRequest,
     IdentityUnbindRequest,
     OAuthAuthorizeResponse,
     OAuthCallbackRequest,
+    SelectTenantRequest,
+    SendVerificationCodeRequest,
     TokenResponse,
     UserLogin,
     UserOut,
     UserRegister,
     UserUpdate,
+    VerifyCodeRequest,
 )
 from sqlalchemy.orm import selectinload
+from jose import jwt
+from app.config import get_settings
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def create_temp_token(identity_id: uuid.UUID, expire_minutes: int = 10) -> str:
+    """Create a temporary token for tenant selection flow."""
+    settings = get_settings()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
+    payload = {
+        "sub": str(identity_id),
+        "type": "temp_tenant_select",
+        "exp": expire,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_temp_token(token: str) -> uuid.UUID:
+    """Decode and validate a temporary token."""
+    settings = get_settings()
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        if payload.get("type") != "temp_tenant_select":
+            raise ValueError("Invalid token type")
+        return uuid.UUID(payload["sub"])
+    except Exception as e:
+        raise ValueError(f"Invalid or expired token: {e}")
+
+
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Get current user or None if not authenticated."""
+    from app.core.security import decode_access_token
+    from sqlalchemy.orm import selectinload
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.split(" ", 1)[1]
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+
+        result = await db.execute(
+            select(User).where(User.id == uuid.UUID(user_id)).options(selectinload(User.identity))
+        )
+        user = result.scalar_one_or_none()
+        return user
+    except Exception:
+        return None
 
 
 @router.get("/registration-config")
@@ -111,18 +173,27 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
         )
 
     # Regular username/password registration
-    # Check existing Identity
-    existing = await db.execute(
-        select(Identity).where((Identity.username == data.username) | (Identity.email == data.email))
-    )
-    if existing.scalars().first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username or email already exists")
+    settings = get_settings()
 
     # Check if this is the first user (→ platform admin + default company org_admin)
     from sqlalchemy import func
 
     user_count = await db.execute(select(func.count()).select_from(User))
     is_first_user = user_count.scalar() == 0
+
+    # Check if new identity system is enabled and require invitation code
+    if settings.FEATURE_NEW_IDENTITY_SYSTEM and not is_first_user:
+        if not data.invitation_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="邀请码必填，请联系企业管理员获取邀请码"
+            )
+
+    # Check existing Identity
+    existing = await db.execute(
+        select(Identity).where((Identity.username == data.username) | (Identity.email == data.email))
+    )
+    if existing.scalars().first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username or email already exists")
 
     # Note: invitation code validation has been moved to the company-join flow
     # (POST /tenants/join). Registration itself is now open.
@@ -789,3 +860,513 @@ async def unbind_identity(
         raise HTTPException(status_code=404, detail=f"No linked identity found for provider '{provider}'")
 
     return UserOut.model_validate(current_user)
+
+
+# ─── Verification Codes ────────────────────────────────
+
+
+@router.post("/send-code")
+async def send_verification_code(
+    request: SendVerificationCodeRequest,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send verification code via email or SMS."""
+    from app.services.verification_service import verification_service, VerificationChannel
+
+    display_name = current_user.display_name if current_user else "User"
+
+    success, message = await verification_service.send_code(
+        contact=request.contact,
+        channel=request.channel,
+        purpose=request.purpose,
+        display_name=display_name,
+    )
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return {"success": True, "message": message}
+
+
+@router.post("/verify-code")
+async def verify_code(
+    data: VerifyCodeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify a verification code."""
+    from app.services.verification_service import verification_service
+
+    success, message = await verification_service.verify_code(
+        contact=data.contact,
+        channel=data.channel,
+        purpose=data.purpose,
+        code=data.code,
+    )
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return {"success": True, "message": message}
+
+
+# ─── Contacts Management ────────────────────────────────
+
+
+@router.get("/contacts", response_model=list[ContactOut])
+async def get_contacts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all contact methods for current user."""
+    from app.services.identity_service import identity_service
+
+    if not current_user.identity_id:
+        return []
+
+    contacts = await identity_service.get_contacts(db, current_user.identity_id)
+    return [ContactOut.model_validate(c) for c in contacts]
+
+
+@router.post("/contacts", response_model=ContactOut)
+async def add_contact(
+    data: AddContactRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a contact method to current user."""
+    from app.services.identity_service import identity_service
+    from app.services.verification_service import verification_service
+
+    if not current_user.identity_id:
+        raise HTTPException(status_code=400, detail="User has no identity")
+
+    # Verify the code first
+    success, message = await verification_service.verify_code(
+        contact=data.contact_value,
+        channel=data.contact_type,
+        purpose="bind",
+        code=data.verification_code,
+    )
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    try:
+        contact = await identity_service.add_contact(
+            db,
+            identity_id=current_user.identity_id,
+            contact_type=data.contact_type,
+            contact_value=data.contact_value,
+            purpose=data.purpose,
+            verified=True,
+            source="manual",
+        )
+        await db.commit()
+        return ContactOut.model_validate(contact)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/contacts/{contact_id}/primary")
+async def set_primary_contact(
+    contact_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a contact as primary."""
+    from app.services.identity_service import identity_service
+
+    if not current_user.identity_id:
+        raise HTTPException(status_code=400, detail="User has no identity")
+
+    try:
+        await identity_service.set_primary_contact(db, current_user.identity_id, contact_id)
+        await db.commit()
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/contacts/{contact_id}")
+async def delete_contact(
+    contact_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a contact method."""
+    from app.services.identity_service import identity_service
+
+    if not current_user.identity_id:
+        raise HTTPException(status_code=400, detail="User has no identity")
+
+    try:
+        await identity_service.delete_contact(db, current_user.identity_id, contact_id)
+        await db.commit()
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── Login Configuration ────────────────────────────────
+
+
+@router.get("/login-config")
+async def get_login_config(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get login page configuration for current domain."""
+    from app.services.platform_service import platform_service
+    from app.models.tenant import Tenant
+
+    host = request.headers.get("host", "")
+    tenant = None
+
+    if host:
+        import re
+
+        domain_lower = host.lower().split(":")[0]
+
+        for proto in ("https://", "http://"):
+            result = await db.execute(select(Tenant).where(Tenant.sso_domain == f"{proto}{host}"))
+            tenant = result.scalar_one_or_none()
+            if tenant:
+                break
+
+        if not tenant:
+            parts = domain_lower.split(".")
+            if len(parts) >= 2:
+                potential_slug = parts[0]
+                if re.match(r"^([a-z0-9][a-z0-9\-]*[a-z0-9])$", potential_slug):
+                    result = await db.execute(select(Tenant).where(Tenant.slug == potential_slug))
+                    tenant = result.scalar_one_or_none()
+
+    if not tenant or not tenant.is_active:
+        return {
+            "tenant_name": None,
+            "tenant_logo": None,
+            "is_public_url": True,
+            "login_methods": ["mobile", "email"],
+            "sso_providers": [],
+        }
+
+    result = await db.execute(
+        select(IdentityProvider).where(
+            IdentityProvider.tenant_id == tenant.id,
+            IdentityProvider.is_active == True,
+            IdentityProvider.provider_type.in_(["feishu", "wecom", "dingtalk"]),
+        )
+    )
+    providers = result.scalars().all()
+
+    provider_names = {
+        "feishu": "飞书",
+        "wecom": "企业微信",
+        "dingtalk": "钉钉",
+    }
+    provider_icons = {
+        "feishu": "https://lf3-cdn-tos.bytegoofy.com/static/object/feishu/web/static/logo/feishu-logo_144x144.png",
+        "wecom": "https://rescdn.qqmail.com/node/wework/wwopen/wwopenmng/style/style/images/independent-43825c34ea.png",
+        "dingtalk": "https://img.alicdn.com/imgextra/i1/O1CN01MoMNui1YrMjFLbMZp_!!6000000003114-2-tps-240-240.png",
+    }
+
+    sso_providers = []
+    public_base = await platform_service.get_public_base_url(db, request)
+
+    for p in providers:
+        redirect_uri = f"{public_base}/api/auth/{p.provider_type}/callback"
+        state = str(tenant.id)
+
+        if p.provider_type == "feishu" and p.config:
+            login_url = f"https://open.feishu.cn/open-apis/authen/v1/authorize?app_id={p.config.get('app_id', '')}&redirect_uri={redirect_uri}&state={state}"
+        elif p.provider_type == "wecom" and p.config:
+            login_url = f"https://open.work.weixin.qq.com/wwopen/sso/confirmConnect?appid={p.config.get('corp_id', '')}&agentid={p.config.get('agent_id', '')}&redirect_uri={redirect_uri}&state={state}"
+        elif p.provider_type == "dingtalk" and p.config:
+            login_url = f"https://login.dingtalk.com/oauth2/auth?redirect_uri={redirect_uri}&client_id={p.config.get('app_key', '')}&scope=openid&state={state}&response_type=code"
+        else:
+            continue
+
+        sso_providers.append(
+            {
+                "type": p.provider_type,
+                "name": provider_names.get(p.provider_type, p.provider_type),
+                "icon": provider_icons.get(p.provider_type, ""),
+                "login_url": login_url,
+            }
+        )
+
+    return {
+        "tenant_name": tenant.name,
+        "tenant_logo": getattr(tenant, "logo_url", None),
+        "is_public_url": False,
+        "login_methods": ["mobile", "email"],
+        "sso_providers": sso_providers,
+    }
+
+
+# ─── Multi-tenant Login ────────────────────────────────
+
+
+@router.post("/select-tenant", response_model=TokenResponse)
+async def select_tenant(
+    data: SelectTenantRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Select tenant after multi-tenant login."""
+    try:
+        identity_id = decode_temp_token(data.temp_token)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    # Find user for this tenant
+    result = await db.execute(
+        select(User).where(
+            User.identity_id == identity_id,
+            User.tenant_id == data.tenant_id,
+        )
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=403, detail="You don't belong to this tenant")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is disabled")
+
+    token = create_access_token(str(user.id), user.role)
+
+    return TokenResponse(
+        access_token=token,
+        user=UserOut.model_validate(user),
+    )
+
+
+# ─── SSO Bind (for new identity system) ────────────────────────────────
+
+
+class SSOBindRequest(BaseModel):
+    """Request for SSO bind with contact verification."""
+
+    sso_token: str
+    bind_type: str
+    mobile: str | None = None
+    email: str | None = None
+    verification_code: str
+    confirm: bool = False
+
+
+@router.post("/sso-bind")
+async def sso_bind(
+    data: SSOBindRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bind SSO identity with contact method.
+
+    This handles:
+    1. First-time SSO login - bind contact
+    2. Cross-tenant binding - confirm before binding
+    """
+    from app.services.verification_service import verification_service
+    from app.services.identity_service import identity_service, normalize_mobile
+    from app.models.user import IdentityBinding
+    from app.models.tenant import Tenant
+    from app.models.identity import SSOScanSession
+
+    # Decode SSO token to get session info
+    try:
+        sso_session_id = uuid.UUID(data.sso_token)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid SSO token")
+
+    # Get SSO session
+    result = await db.execute(select(SSOScanSession).where(SSOScanSession.id == sso_session_id))
+    sso_session = result.scalar_one_or_none()
+    if not sso_session or not sso_session.user_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired SSO session")
+
+    # Determine contact to bind
+    contact = None
+    contact_type = None
+    if data.bind_type == "use_suggested":
+        # Use contact from SSO provider (should be pre-filled)
+        if data.mobile:
+            contact = normalize_mobile(data.mobile)
+            contact_type = "mobile"
+        elif data.email:
+            contact = data.email.lower()
+            contact_type = "email"
+    else:
+        # Use contact provided by user
+        if data.mobile:
+            contact = normalize_mobile(data.mobile)
+            contact_type = "mobile"
+        elif data.email:
+            contact = data.email.lower()
+            contact_type = "email"
+
+    if not contact or not contact_type:
+        raise HTTPException(status_code=400, detail="No contact provided")
+
+    # Verify the code
+    success, message = await verification_service.verify_code(
+        contact=contact,
+        channel=contact_type,
+        purpose="bind",
+        code=data.verification_code,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    # Get the user from SSO session
+    user_result = await db.execute(select(User).where(User.id == sso_session.user_id))
+    sso_user = user_result.scalar_one_or_none()
+    if not sso_user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    # Check if contact already has an identity
+    existing_identity = await identity_service.find_identity_by_contact(db, contact_type, contact)
+
+    if existing_identity:
+        # Check if existing identity belongs to another tenant
+        existing_user_result = await db.execute(select(User).where(User.identity_id == existing_identity.id))
+        existing_user = existing_user_result.scalar_one_or_none()
+
+        if existing_user and existing_user.tenant_id != sso_user.tenant_id:
+            # Cross-tenant binding - need confirmation
+            if not data.confirm:
+                # Get tenant names
+                new_tenant_result = await db.execute(select(Tenant).where(Tenant.id == sso_user.tenant_id))
+                new_tenant = new_tenant_result.scalar_one_or_none()
+                existing_tenant_result = await db.execute(select(Tenant).where(Tenant.id == existing_user.tenant_id))
+                existing_tenant = existing_tenant_result.scalar_one_or_none()
+
+                return {
+                    "needs_confirmation": True,
+                    "existing_tenant_name": existing_tenant.name if existing_tenant else "其他企业",
+                    "new_tenant_name": new_tenant.name if new_tenant else "当前企业",
+                    "identity_id": str(existing_identity.id),
+                }
+
+            # Confirmed - bind SSO to existing identity
+            # Create identity binding for SSO (if not already exists)
+            if sso_session.provider_type:
+                existing_binding_result = await db.execute(
+                    select(IdentityBinding).where(
+                        IdentityBinding.identity_id == existing_identity.id,
+                        IdentityBinding.provider_type == sso_session.provider_type,
+                        IdentityBinding.provider_user_id == str(sso_session.user_id),
+                    )
+                )
+                existing_binding = existing_binding_result.scalar_one_or_none()
+                if not existing_binding:
+                    binding = IdentityBinding(
+                        identity_id=existing_identity.id,
+                        provider_type=sso_session.provider_type,
+                        provider_user_id=str(sso_session.user_id),
+                        email=contact if contact_type == "email" else None,
+                        mobile=contact if contact_type == "mobile" else None,
+                    )
+                    db.add(binding)
+
+            # Create org_member for the new tenant (if not already exists)
+            from app.models.org import OrgMember
+
+            existing_member_result = await db.execute(
+                select(OrgMember).where(
+                    OrgMember.tenant_id == sso_user.tenant_id,
+                    OrgMember.user_id == existing_user.id,
+                )
+            )
+            existing_member = existing_member_result.scalar_one_or_none()
+            if not existing_member:
+                member = OrgMember(
+                    tenant_id=sso_user.tenant_id,
+                    user_id=existing_user.id,
+                    role="member",
+                )
+                db.add(member)
+            await db.commit()
+
+            # Return token for existing user
+            token = create_access_token(str(existing_user.id), existing_user.role)
+            return TokenResponse(
+                access_token=token,
+                user=UserOut.model_validate(existing_user),
+            )
+
+    # No existing identity or same tenant - proceed with binding
+    if not sso_user.identity_id:
+        # Create new identity for the user
+        identity = Identity(
+            email=contact if contact_type == "email" else None,
+            phone=contact if contact_type == "mobile" else None,
+            email_verified=contact_type == "email",
+            phone_verified=contact_type == "mobile",
+            is_active=True,
+        )
+        db.add(identity)
+        await db.flush()
+        sso_user.identity_id = identity.id
+
+        # Add contact to identity
+        await identity_service.add_contact(
+            db,
+            identity_id=identity.id,
+            contact_type=contact_type,
+            contact_value=contact,
+            purpose="primary",
+            verified=True,
+            source="sso_bind",
+        )
+    else:
+        # Update existing identity with verified contact
+        identity_result = await db.execute(select(Identity).where(Identity.id == sso_user.identity_id))
+        identity = identity_result.scalar_one_or_none()
+        if identity:
+            if contact_type == "email":
+                identity.email = contact
+                identity.email_verified = True
+            elif contact_type == "mobile":
+                identity.phone = contact
+                identity.phone_verified = True
+
+        # Add contact to existing identity
+        await identity_service.add_contact(
+            db,
+            identity_id=sso_user.identity_id,
+            contact_type=contact_type,
+            contact_value=contact,
+            purpose="verified",
+            verified=True,
+            source="sso_bind",
+        )
+
+    # Create identity binding for SSO (if not already exists)
+    if sso_session.provider_type and sso_user.identity_id:
+        existing_binding_result = await db.execute(
+            select(IdentityBinding).where(
+                IdentityBinding.identity_id == sso_user.identity_id,
+                IdentityBinding.provider_type == sso_session.provider_type,
+                IdentityBinding.provider_user_id == str(sso_session.user_id),
+            )
+        )
+        existing_binding = existing_binding_result.scalar_one_or_none()
+        if not existing_binding:
+            binding = IdentityBinding(
+                identity_id=sso_user.identity_id,
+                provider_type=sso_session.provider_type,
+                provider_user_id=str(sso_session.user_id),
+                email=contact if contact_type == "email" else None,
+                mobile=contact if contact_type == "mobile" else None,
+            )
+            db.add(binding)
+
+    await db.commit()
+
+    # Return token
+    token = create_access_token(str(sso_user.id), sso_user.role)
+    return TokenResponse(
+        access_token=token,
+        user=UserOut.model_validate(sso_user),
+    )

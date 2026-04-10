@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, delete, func, select, update
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, delete, func, select, update, or_
 
 import httpx
 from loguru import logger
@@ -403,11 +403,23 @@ class BaseOrgSyncAdapter(ABC):
             )
             department = dept_result.scalar_one_or_none()
 
-        # Check if exists by external_id and provider
+        # Check if exists by external_id, unionid, or open_id and provider.
+        # Different flows (SSO vs sync) may use different ID fields:
+        # - SSO stores union_id as external_id
+        # - Sync stores user_id (open_id) as external_id
+        # We need to match on any of these to avoid duplicate records.
+        id_conditions = [
+            OrgMember.external_id == user.external_id,
+        ]
+        if user.unionid:
+            id_conditions.append(OrgMember.unionid == user.unionid)
+        if user.open_id:
+            id_conditions.append(OrgMember.open_id == user.open_id)
+
         result = await db.execute(
             select(OrgMember).where(
-                OrgMember.external_id == user.external_id,
                 OrgMember.provider_id == provider.id,
+                or_(*id_conditions),
             )
         )
         existing_member = result.scalar_one_or_none()
@@ -676,6 +688,24 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
             all_users = await self._fetch_all_users()
             logger.info(f"Feishu fetched {len(all_users)} total users globally.")
 
+            # Fallback: if global API returns 0 users, try department-based fetch
+            if len(all_users) == 0 and departments:
+                logger.info("[OrgSync] Global user API returned 0 users, falling back to department-based fetch...")
+                import asyncio
+
+                async def fetch_dept_users(dept_id):
+                    return await self._fetch_users_by_department(dept_id)
+
+                results = await asyncio.gather(
+                    *[fetch_dept_users(d.external_id) for d in departments], return_exceptions=True
+                )
+                for r in results:
+                    if isinstance(r, list):
+                        all_users.extend(r)
+                    elif isinstance(r, Exception):
+                        logger.warning(f"[OrgSync] Department fetch failed: {r}")
+                logger.info(f"[OrgSync] Fallback fetched {len(all_users)} users from departments")
+
             # Ensure all departments referenced by users exist in DB.
             # When fetch_departments() returns 40004 (no dept authority), we still get
             # valid department_ids[] from each user's record, so we can auto-create
@@ -795,14 +825,28 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                     logger.error(f"[OrgSync] Failed to sync member {user.external_id} ({user.name}): {e}")
                     errors.append(f"Member {user.external_id}: {str(e)}")
 
-            # Update provider metadata
+            # Update provider metadata and reconcile
             if self.provider:
                 config = (self.provider.config or {}).copy()
                 config["last_synced_at"] = datetime.now().isoformat()
                 self.provider.config = config
                 await db.flush()
-                await self._reconcile(db, provider.id, sync_start)
-                await db.flush()
+
+                # IMPORTANT: Only reconcile if we successfully synced members.
+                # If member_count == 0, it means API returned no users (permission denied or empty tenant).
+                # Don't delete existing members in that case.
+                if member_count > 0:
+                    await self._reconcile(db, provider.id, sync_start)
+                    await db.flush()
+                else:
+                    logger.warning(f"[OrgSync] No members synced, skipping reconcile to preserve existing data")
+                    errors.append(
+                        f"⚠️ 未同步到成员数据：飞书 API 返回空结果。\n"
+                        f"请检查飞书应用是否有以下权限并已发布版本：\n"
+                        f"• contact:contact.base:readonly (通讯录基础信息)\n"
+                        f"• contact:user.base:readonly (用户基本信息)\n"
+                    )
+
                 await self._update_member_counts(db, provider.id)
                 await db.flush()
 
@@ -820,12 +864,20 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                     f"2. 飞书 API 服务响应慢\n"
                     f"请稍后重试，或检查网络配置。"
                 )
-            elif "permission" in error_msg.lower() or "99991663" in error_msg or "99991664" in error_msg:
+            elif (
+                "permission" in error_msg.lower()
+                or "99991663" in error_msg
+                or "99991664" in error_msg
+                or "99991672" in error_msg
+                or "权限不足" in error_msg
+            ):
                 errors.append(
                     f"⚠️ 权限不足：飞书应用缺少必要权限。\n"
                     f"请在飞书开放平台添加以下权限并重新发布版本：\n"
-                    f"1. contact:user.base:readonly (获取用户基本信息)\n"
-                    f"2. contact:department.base:readonly (获取部门信息)"
+                    f"• contact:contact.base:readonly (通讯录基础信息)\n"
+                    f"• contact:user.base:readonly (获取用户基本信息)\n"
+                    f"• contact:department.base:readonly (获取部门信息)\n\n"
+                    f"操作步骤：飞书开放平台 → 应用 → 权限管理 → 申请权限 → 发布版本"
                 )
             else:
                 errors.append(f"⚠️ 同步失败：{error_msg}")
@@ -878,11 +930,13 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
                     error_msg = data.get("msg", "")
                     logger.error(f"Feishu fetch all users error: code={error_code}, msg={error_msg}")
                     # Provide helpful error message for common permission issues
-                    if error_code in (99991663, 99991664):
+                    if error_code in (99991663, 99991664, 99991672):
                         raise RuntimeError(
-                            f"Feishu API permission error (code {error_code}): {error_msg}. "
-                            f"Please ensure the Feishu app has 'contact:user.base:readonly' permission. "
-                            f"Go to Feishu Open Platform -> App -> Permissions -> enable and publish."
+                            f"⚠️ 飞书权限不足 (错误码 {error_code})：{error_msg}\n\n"
+                            f"请在飞书开放平台添加以下权限并发布应用版本：\n"
+                            f"• contact:contact.base:readonly (通讯录基础信息)\n"
+                            f"• contact:user.base:readonly (用户基本信息)\n\n"
+                            f"操作步骤：飞书开放平台 → 应用 → 权限管理 → 申请权限 → 发布版本"
                         )
                     break
 
@@ -930,9 +984,78 @@ class FeishuOrgSyncAdapter(BaseOrgSyncAdapter):
         logger.info(f"[Feishu] Total users fetched: {len(users)}")
         return users
 
+    async def _fetch_users_by_department(self, department_external_id: str) -> list[ExternalUser]:
+        """Fetch users from a specific department using find_by_department API.
+
+        Used as fallback when global user list API returns 0 users.
+        """
+        token = await self.get_access_token()
+        users: list[ExternalUser] = []
+        page_token = ""
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            while True:
+                params = {
+                    "department_id": department_external_id,
+                    "department_id_type": "open_department_id",
+                    "page_size": "50",
+                    "user_id_type": "user_id",
+                }
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    self.FEISHU_USERS_URL,
+                    params=params,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                data = resp.json()
+
+                if data.get("code") != 0:
+                    error_code = data.get("code")
+                    if error_code in (99991663, 99991664):
+                        logger.warning(
+                            f"[Feishu] Department {department_external_id}: permission denied (code {error_code})"
+                        )
+                    else:
+                        logger.warning(
+                            f"[Feishu] Department {department_external_id} fetch error: code={error_code}, msg={data.get('msg')}"
+                        )
+                    break
+
+                res_data = data.get("data", {})
+                items = res_data.get("items", []) or []
+
+                for item in items:
+                    raw_dept_ids = item.get("department_ids", [])
+                    department_ids = [str(did) for did in raw_dept_ids] if raw_dept_ids else [department_external_id]
+
+                    user = ExternalUser(
+                        external_id=item.get("user_id", "") or item.get("open_id", ""),
+                        open_id=item.get("open_id", ""),
+                        unionid=item.get("union_id", ""),
+                        name=item.get("name", ""),
+                        email=item.get("email", ""),
+                        avatar_url=item.get("avatar_url", ""),
+                        title=item.get("title", ""),
+                        department_external_id=department_ids[0] if department_ids else "0",
+                        department_ids=department_ids,
+                        mobile=item.get("mobile", ""),
+                        status="active" if item.get("status", {}).get("is_activated") else "inactive",
+                        raw_data=item,
+                    )
+                    users.append(user)
+
+                page_token = res_data.get("page_token", "")
+                if not res_data.get("has_more", False) or not page_token:
+                    break
+
+        logger.info(f"[Feishu] Fetched {len(users)} users from department {department_external_id}")
+        return users
+
     async def fetch_users(self, department_external_id: str) -> list[ExternalUser]:
-        # Dummy implementation - not used since we override sync_org_structure
-        return []
+        # Use the new implementation
+        return await self._fetch_users_by_department(department_external_id)
 
 
 class DingTalkOrgSyncAdapter(BaseOrgSyncAdapter):

@@ -127,6 +127,54 @@ async def feishu_oauth_callback(code: str, state: str = None, db: AsyncSession =
         # Find or create user
         user, is_new = await auth_provider.find_or_create_user(db, user_info, tenant_id=tenant_id)
 
+        # Check if user needs to bind contact (new identity system)
+        from app.models.user import Identity
+
+        settings = get_settings()
+        needs_binding = False
+        suggested_email = None
+        suggested_mobile = None
+        if settings.FEATURE_NEW_IDENTITY_SYSTEM:
+            logger.info(f"[SSO] Checking binding for user {user.id}, identity_id={user.identity_id}")
+            # Check if user has identity with verified email or phone
+            if user.identity_id:
+                result = await db.execute(select(Identity).where(Identity.id == user.identity_id))
+                identity = result.scalar_one_or_none()
+                if identity:
+                    logger.info(
+                        f"[SSO] Identity: email={identity.email}, email_verified={identity.email_verified}, phone={identity.phone}, phone_verified={identity.phone_verified}"
+                    )
+                    # Filter out virtual emails (e.g., xxx@feishu.local)
+                    real_email = identity.email if identity.email and not identity.email.endswith(".local") else None
+                    real_phone = identity.phone
+
+                    has_verified_contact = (real_email and identity.email_verified) or (
+                        real_phone and identity.phone_verified
+                    )
+                    logger.info(
+                        f"[SSO] real_email={real_email}, real_phone={real_phone}, has_verified_contact={has_verified_contact}"
+                    )
+                    if not has_verified_contact:
+                        needs_binding = True
+                        # Only suggest real contacts from SSO provider
+                        suggested_email = (
+                            user_info.email if user_info.email and not user_info.email.endswith(".local") else None
+                        )
+                        suggested_mobile = user_info.mobile
+                        logger.info(
+                            f"[SSO] needs_binding=True, suggested_email={suggested_email}, suggested_mobile={suggested_mobile}"
+                        )
+            else:
+                # No identity yet - needs binding
+                needs_binding = True
+                suggested_email = (
+                    user_info.email if user_info.email and not user_info.email.endswith(".local") else None
+                )
+                suggested_mobile = user_info.mobile
+                logger.info(
+                    f"[SSO] No identity, needs_binding=True, suggested_email={suggested_email}, suggested_mobile={suggested_mobile}"
+                )
+
         # Generate JWT token
         from app.core.security import create_access_token
 
@@ -142,17 +190,31 @@ async def feishu_oauth_callback(code: str, state: str = None, db: AsyncSession =
             s_res = await db.execute(select(SSOScanSession).where(SSOScanSession.id == sid))
             session = s_res.scalar_one_or_none()
             if session:
-                session.status = "authorized"
+                # Set status based on binding requirement
+                if needs_binding:
+                    session.status = "needs_binding"
+                else:
+                    session.status = "authorized"
                 session.provider_type = "feishu"
                 session.user_id = user.id
                 session.access_token = token
                 session.error_msg = None
                 await db.commit()
+
+                if needs_binding:
+                    redirect_url = f"/sso-bind?token={sid}&provider=feishu"
+                    if suggested_mobile:
+                        redirect_url += f"&mobile={suggested_mobile}"
+                    if suggested_email:
+                        redirect_url += f"&email={suggested_email}"
+                else:
+                    redirect_url = f"/sso/entry?sid={sid}&complete=1"
+
                 return HTMLResponse(
                     f"""<html><head><meta charset="utf-8" /></head>
                     <body style="font-family: sans-serif; padding: 24px;">
                         <div>SSO login successful. Redirecting...</div>
-                        <script>window.location.href = "/sso/entry?sid={sid}&complete=1";</script>
+                        <script>window.location.href = "{redirect_url}";</script>
                     </body></html>"""
                 )
         except Exception as e:
@@ -343,6 +405,8 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
         sender = event.get("sender", {}).get("sender_id", {})
         sender_open_id = sender.get("open_id", "")
         sender_user_id_from_event = sender.get("user_id", "")  # tenant-stable ID, available directly in event body
+
+        logger.info(f"[Feishu] Sender info from event: open_id={sender_open_id}, user_id={sender_user_id_from_event}")
         msg_type = message.get("message_type", "text")
         chat_type = message.get("chat_type", "p2p")  # p2p or group
         chat_id = message.get("chat_id", "")
@@ -533,7 +597,8 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                                 "email": sender_email,
                                 "mobile": _user_info.get("mobile"),
                                 "avatar_url": _avatar_url,
-                                "unionid": _user_info.get("user_id"),  # tenant-level user_id
+                                "user_id": sender_user_id_feishu,  # tenant-level user_id (stable across apps)
+                                "unionid": _user_info.get("union_id"),  # cross-tenant union_id
                                 "open_id": sender_open_id,
                             }
                             logger.info(f"[Feishu] Resolved sender: {sender_name} (user_id={sender_user_id_feishu})")

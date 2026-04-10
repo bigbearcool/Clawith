@@ -6,6 +6,14 @@ import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../stores';
 import LinearCopyButton from '../components/LinearCopyButton';
 
+interface ChannelIdentity {
+    provider_type: string;
+    external_id: string | null;
+    open_id: string | null;
+    unionid: string | null;
+    name: string | null;
+}
+
 interface UserInfo {
     id: string;
     username: string;
@@ -22,6 +30,7 @@ interface UserInfo {
     feishu_open_id?: string;
     created_at?: string;
     source?: string;
+    channel_identities?: ChannelIdentity[];
 }
 
 const API_PREFIX = '/api';
@@ -74,6 +83,11 @@ export default function UserManagement() {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
     const [page, setPage] = useState(1);
+    const [showUnboundOnly, setShowUnboundOnly] = useState(false);
+    const [showMergeModal, setShowMergeModal] = useState(false);
+    const [mergeSourceUser, setMergeSourceUser] = useState<UserInfo | null>(null);
+    const [mergeTargetId, setMergeTargetId] = useState<string>('');
+    const [merging, setMerging] = useState(false);
 
     const loadUsers = async () => {
         setLoading(true);
@@ -164,6 +178,36 @@ export default function UserManagement() {
         setInviting(false);
     };
 
+    const handleMergeUser = async () => {
+        if (!mergeSourceUser || !mergeTargetId) return;
+        if (mergeSourceUser.id === mergeTargetId) {
+            setToast(isChinese ? '不能合并到同一个用户' : 'Cannot merge to the same user');
+            setTimeout(() => setToast(''), 3000);
+            return;
+        }
+        setMerging(true);
+        try {
+            const res = await fetchJson<{ message: string }>(`/users/${mergeSourceUser.id}/merge-to/${mergeTargetId}`, { method: 'POST' });
+            setToast(`✅ ${res.message}`);
+            setTimeout(() => setToast(''), 3000);
+            setShowMergeModal(false);
+            setMergeSourceUser(null);
+            setMergeTargetId('');
+            loadUsers();
+        } catch (e: any) {
+            const detail = (() => { try { return JSON.parse(e.message)?.detail; } catch { return e.message; } })();
+            setToast(`❌ ${detail || e.message}`);
+            setTimeout(() => setToast(''), 4000);
+        }
+        setMerging(false);
+    };
+
+    const openMergeModal = (user: UserInfo) => {
+        setMergeSourceUser(user);
+        setMergeTargetId('');
+        setShowMergeModal(true);
+    };
+
     const periodLabel = (period: string) => {
         if (isChinese) {
             const map: Record<string, string> = { permanent: '永久', daily: '每天', weekly: '每周', monthly: '每月' };
@@ -194,14 +238,17 @@ export default function UserManagement() {
     };
 
     // Search filter
-    const filtered = searchQuery.trim()
-        ? users.filter(u => {
+    const filtered = (() => {
+        let result = users;
+        if (showUnboundOnly) {
+            result = result.filter(u => !u.email && (!u.channel_identities || u.channel_identities.length === 0));
+        }
+        if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
-            return (u.username?.toLowerCase().includes(q))
-                || (u.display_name?.toLowerCase().includes(q))
-                || (u.email?.toLowerCase().includes(q));
-        })
-        : users;
+            result = result.filter(u => (u.username?.toLowerCase().includes(q)) || (u.display_name?.toLowerCase().includes(q)) || (u.email?.toLowerCase().includes(q)));
+        }
+        return result;
+    })();
 
     // Sort
     const sorted = [...filtered].sort((a, b) => {
@@ -247,13 +294,16 @@ export default function UserManagement() {
                                 value={searchQuery}
                                 onChange={e => { setSearchQuery(e.target.value); setPage(1); }}
                                 style={{
-                                    width: '360px', fontSize: '13px',
+                                    width: '280px', fontSize: '13px',
                                     padding: '8px 12px 8px 12px',
                                     background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
                                     borderRadius: '8px',
                                 }}
                             />
-                            {searchQuery && (
+                            <button className={`btn ${showUnboundOnly ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: '12px', padding: '6px 12px' }} onClick={() => { setShowUnboundOnly(!showUnboundOnly); setPage(1); }}>
+                                {isChinese ? '未绑定' : 'Unbound'}
+                            </button>
+                            {(searchQuery || showUnboundOnly) && (
                                 <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                                     {isChinese ? `${filtered.length} / ${users.length} 位用户` : `${filtered.length} / ${users.length} users`}
                                 </span>
@@ -305,6 +355,15 @@ export default function UserManagement() {
                                         {roleBadge(user.role)}
                                     </div>
                                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>@{user.username}</div>
+                                    {user.channel_identities && user.channel_identities.length > 0 && (
+                                        <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                                            {[...new Set(user.channel_identities.map(ch => ch.provider_type))].map(pt => (
+                                                <span key={pt} style={{ fontSize: '9px', background: pt === 'feishu' ? 'rgba(58,132,255,0.12)' : pt === 'dingtalk' ? 'rgba(0,137,255,0.12)' : 'rgba(43,174,103,0.12)', color: pt === 'feishu' ? '#3a84ff' : pt === 'dingtalk' ? '#0089ff' : '#2bae67', borderRadius: '3px', padding: '1px 5px' }}>
+                                                    {pt === 'feishu' ? '飞书' : pt === 'dingtalk' ? '钉钉' : pt === 'wecom' ? '企微' : pt}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{user.email}</div>
                                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{formatDate(user.created_at)}</div>
@@ -357,161 +416,94 @@ export default function UserManagement() {
                                     <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}> / {user.quota_max_agents}</span>
                                 </div>
                                 <div style={{ fontSize: '12px' }}>{user.quota_agent_ttl_hours}h</div>
-                                <div>
-                                    <button
-                                        className="btn btn-secondary"
-                                        style={{ padding: '4px 10px', fontSize: '11px' }}
-                                        onClick={() => editingUserId === user.id ? setEditingUserId(null) : startEdit(user)}
-                                    >
-                                        {editingUserId === user.id ? t('common.cancel') : `✏️ ${t('common.edit')}`}
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                    <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => editingUserId === user.id ? setEditingUserId(null) : startEdit(user)}>
+                                        {editingUserId === user.id ? t('common.cancel') : `✏️`}
                                     </button>
+                                    {user.role !== 'platform_admin' && (
+                                        <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => openMergeModal(user)} title={isChinese ? '合并到其他用户' : 'Merge to another user'}>
+                                            🔗
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
                             {/* Inline edit form */}
                             {editingUserId === user.id && (
-                                <div className="card" style={{
-                                    marginTop: '4px', padding: '16px',
-                                    background: 'var(--bg-secondary)',
-                                    borderLeft: '3px solid var(--accent-color)',
-                                }}>
+                                <div className="card" style={{ marginTop: '4px', padding: '16px', background: 'var(--bg-secondary)', borderLeft: '3px solid var(--accent-color)' }}>
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px' }}>
                                         <div className="form-group">
-                                            <label className="form-label" style={{ fontSize: '11px' }}>
-                                                {t('enterprise.users.msgLimit', isChinese ? '消息限额' : 'Message Limit')}
-                                            </label>
-                                            <input
-                                                className="form-input"
-                                                type="number" min={0}
-                                                value={editForm.quota_message_limit}
-                                                onChange={e => setEditForm({ ...editForm, quota_message_limit: Number(e.target.value) })}
-                                            />
+                                            <label className="form-label" style={{ fontSize: '11px' }}>{t('enterprise.users.msgLimit', isChinese ? '消息限额' : 'Message Limit')}</label>
+                                            <input className="form-input" type="number" min={0} value={editForm.quota_message_limit} onChange={e => setEditForm({ ...editForm, quota_message_limit: Number(e.target.value) })} />
                                         </div>
                                         <div className="form-group">
-                                            <label className="form-label" style={{ fontSize: '11px' }}>
-                                                {t('enterprise.users.period', isChinese ? '重置周期' : 'Period')}
-                                            </label>
-                                            <select
-                                                className="form-input"
-                                                value={editForm.quota_message_period}
-                                                onChange={e => setEditForm({ ...editForm, quota_message_period: e.target.value })}
-                                            >
-                                                {PERIOD_OPTIONS.map(p => (
-                                                    <option key={p.value} value={p.value}>{periodLabel(p.value)}</option>
-                                                ))}
+                                            <label className="form-label" style={{ fontSize: '11px' }}>{t('enterprise.users.period', isChinese ? '重置周期' : 'Period')}</label>
+                                            <select className="form-input" value={editForm.quota_message_period} onChange={e => setEditForm({ ...editForm, quota_message_period: e.target.value })}>
+                                                {PERIOD_OPTIONS.map(p => (<option key={p.value} value={p.value}>{periodLabel(p.value)}</option>))}
                                             </select>
                                         </div>
                                         <div className="form-group">
-                                            <label className="form-label" style={{ fontSize: '11px' }}>
-                                                {t('enterprise.users.maxAgents', isChinese ? '最多数字员工' : 'Max Agents')}
-                                            </label>
-                                            <input
-                                                className="form-input"
-                                                type="number" min={0}
-                                                value={editForm.quota_max_agents}
-                                                onChange={e => setEditForm({ ...editForm, quota_max_agents: Number(e.target.value) })}
-                                            />
+                                            <label className="form-label" style={{ fontSize: '11px' }}>{t('enterprise.users.maxAgents', isChinese ? '最多数字员工' : 'Max Agents')}</label>
+                                            <input className="form-input" type="number" min={0} value={editForm.quota_max_agents} onChange={e => setEditForm({ ...editForm, quota_max_agents: Number(e.target.value) })} />
                                         </div>
                                         <div className="form-group">
-                                            <label className="form-label" style={{ fontSize: '11px' }}>
-                                                {t('enterprise.users.agentTTL', isChinese ? '员工存活时长(h)' : 'Agent TTL (hours)')}
-                                            </label>
-                                            <input
-                                                className="form-input"
-                                                type="number" min={1}
-                                                value={editForm.quota_agent_ttl_hours}
-                                                onChange={e => setEditForm({ ...editForm, quota_agent_ttl_hours: Number(e.target.value) })}
-                                            />
+                                            <label className="form-label" style={{ fontSize: '11px' }}>{t('enterprise.users.agentTTL', isChinese ? '员工存活时长(h)' : 'Agent TTL (hours)')}</label>
+                                            <input className="form-input" type="number" min={1} value={editForm.quota_agent_ttl_hours} onChange={e => setEditForm({ ...editForm, quota_agent_ttl_hours: Number(e.target.value) })} />
                                         </div>
                                     </div>
                                     <div style={{ marginTop: '12px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                                        <button className="btn btn-secondary" onClick={() => setEditingUserId(null)}>
-                                            {t('common.cancel')}
-                                        </button>
-                                        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                                            {saving ? t('common.loading') : t('common.save', 'Save')}
-                                        </button>
+                                        <button className="btn btn-secondary" onClick={() => setEditingUserId(null)}>{t('common.cancel')}</button>
+                                        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? (isChinese ? '保存中...' : 'Saving...') : t('common.save')}</button>
                                     </div>
                                 </div>
                             )}
                         </div>
                     ))}
 
-                    {users.length === 0 && (
-                        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-tertiary)' }}>
-                            {t('common.noData')}
+                    {paged.length === 0 && (
+                        <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-tertiary)' }}>
+                            {isChinese ? '暂无用户数据' : 'No users found'}
                         </div>
                     )}
 
                     {/* Pagination */}
                     {totalPages > 1 && (
-                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '16px' }}>
-                            <button
-                                className="btn btn-secondary"
-                                style={{ padding: '4px 10px', fontSize: '12px' }}
-                                disabled={page <= 1}
-                                onClick={() => setPage(p => p - 1)}
-                            >
-                                ‹ {isChinese ? '上一页' : 'Prev'}
-                            </button>
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                                <button
-                                    key={p}
-                                    className={`btn ${p === page ? 'btn-primary' : 'btn-secondary'}`}
-                                    style={{ padding: '4px 10px', fontSize: '12px', minWidth: '32px' }}
-                                    onClick={() => setPage(p)}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                            <button
-                                className="btn btn-secondary"
-                                style={{ padding: '4px 10px', fontSize: '12px' }}
-                                disabled={page >= totalPages}
-                                onClick={() => setPage(p => p + 1)}
-                            >
-                                {isChinese ? '下一页' : 'Next'} ›
-                            </button>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '16px' }}>
+                            <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>{isChinese ? '上一页' : 'Prev'}</button>
+                            <span style={{ padding: '8px 16px', fontSize: '13px' }}>{page} / {totalPages}</span>
+                            <button className="btn btn-secondary" disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>{isChinese ? '下一页' : 'Next'}</button>
                         </div>
                     )}
                 </div>
             )}
 
             {/* Invite Users Modal */}
-            {showInviteModal && (
-                <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }} onClick={() => setShowInviteModal(false)}>
-                    <div style={{ background: 'var(--bg-primary)', borderRadius: '12px', border: '1px solid var(--border-subtle)', width: '500px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
-                        {/* Header */}
-                        <div style={{ padding: '20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{isChinese ? '邀请新用户' : 'Invite Users'}</h3>
-                            <button onClick={() => setShowInviteModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', fontSize: '18px', cursor: 'pointer', padding: '4px 8px' }}>x</button>
+            {showMergeModal && mergeSourceUser && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowMergeModal(false)}>
+                    <div style={{ background: 'var(--bg-primary)', borderRadius: '12px', width: '480px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between' }}>
+                            <h3 style={{ margin: 0, fontSize: '16px' }}>{isChinese ? '合并用户' : 'Merge User'}</h3>
+                            <button onClick={() => setShowMergeModal(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer' }}>x</button>
                         </div>
-                        {/* Body */}
                         <div style={{ padding: '20px' }}>
-                            <label className="form-label" style={{ fontSize: '13px', marginBottom: '6px' }}>{isChinese ? '邮箱地址' : 'Email Addresses'}</label>
-                            <textarea
-                                className="form-input"
-                                rows={5}
-                                placeholder={isChinese ? '输入邮箱地址，用逗号或换行分隔...' : 'Enter email addresses, separated by commas or newlines...'}
-                                value={inviteEmails}
-                                onChange={e => setInviteEmails(e.target.value)}
-                                style={{ resize: 'vertical', fontSize: '13px', marginBottom: '16px', width: '100%' }}
-                            />
-                            {/* public link generated here previously */}
-                            {inviteResult && (
-                                <div style={{ marginTop: '12px', padding: '10px 14px', background: 'rgba(0,200,100,0.1)', color: 'var(--success)', borderRadius: '6px', fontSize: '13px' }}>
-                                    {inviteResult.message} ({inviteResult.invited} {isChinese ? '位用户' : 'users'})
-                                </div>
-                            )}
+                            <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{isChinese ? '源用户' : 'Source User'}</div>
+                                <div style={{ fontWeight: 500 }}>{mergeSourceUser.display_name || mergeSourceUser.username}</div>
+                            </div>
+                            <label className="form-label">{isChinese ? '合并到' : 'Merge to'}</label>
+                            <select className="form-input" value={mergeTargetId} onChange={e => setMergeTargetId(e.target.value)}>
+                                <option value="">{isChinese ? '选择...' : 'Select...'}</option>
+                                {users.filter(u => u.id !== mergeSourceUser.id && u.role !== 'platform_admin' && (u.email || (u.channel_identities && u.channel_identities.length > 0))).map(u => (
+                                    <option key={u.id} value={u.id}>{u.display_name || u.username} ({u.email || '有渠道'})</option>
+                                ))}
+                            </select>
+                            <div style={{ marginTop: '12px', padding: '10px', background: 'rgba(255,150,0,0.1)', color: '#f90', borderRadius: '6px', fontSize: '12px' }}>
+                                ⚠️ {isChinese ? '合并后源用户将被删除' : 'Source user will be deleted'}
+                            </div>
                         </div>
-                        {/* Footer */}
-                        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end', gap: '12px', background: 'var(--bg-secondary)', borderRadius: '0 0 12px 12px' }}>
-                            <button className="btn btn-secondary" onClick={() => setShowInviteModal(false)}>
-                                {isChinese ? '取消' : 'Cancel'}
-                            </button>
-                            <button className="btn btn-primary" onClick={handleSendInvites} disabled={inviting || !inviteEmails.trim()}>
-                                {inviting ? (isChinese ? '发送中...' : 'Sending...') : (isChinese ? '发送邀请' : 'Send Invitations')}
-                            </button>
+                        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                            <button className="btn btn-secondary" onClick={() => setShowMergeModal(false)}>{isChinese ? '取消' : 'Cancel'}</button>
+                            <button className="btn btn-primary" onClick={handleMergeUser} disabled={merging || !mergeTargetId}>{merging ? '...' : (isChinese ? '确认' : 'Confirm')}</button>
                         </div>
                     </div>
                 </div>

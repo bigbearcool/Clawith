@@ -18,6 +18,7 @@ import EnterpriseSettings from './pages/EnterpriseSettings';
 import InvitationCodes from './pages/InvitationCodes';
 import AdminCompanies from './pages/AdminCompanies';
 import SSOEntry from './pages/SSOEntry';
+import SSOBind from './pages/SSOBind';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const token = useAuthStore((s) => s.token);
@@ -133,7 +134,7 @@ export default function App() {
         const urlParams = new URLSearchParams(window.location.search);
         const urlToken = urlParams.get('token');
         const currentPath = window.location.pathname;
-        const pathsWithOwnToken = ['/reset-password', '/verify-email'];
+        const pathsWithOwnToken = ['/reset-password', '/verify-email', '/sso-bind'];
         let effectiveToken = token;
 
         if (urlToken && !pathsWithOwnToken.includes(currentPath)) {
@@ -181,6 +182,7 @@ export default function App() {
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/verify-email" element={<VerifyEmail />} />
                 <Route path="/sso/entry" element={<SSOEntry />} />
+                <Route path="/sso-bind" element={<SSOBind />} />
                 <Route path="/setup-company" element={<CompanySetup />} />
                 <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                     <Route index element={<Navigate to="/plaza" replace />} />

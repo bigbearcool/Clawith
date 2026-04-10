@@ -113,6 +113,33 @@ class Settings(BaseSettings):
     # Jina AI (Reader + Search APIs)
     JINA_API_KEY: str = ""
 
+    # SMS Configuration
+    SMS_PROVIDER: str = "alibaba"  # alibaba | tencent
+    VERIFICATION_CODE_EMAIL_EXPIRE: int = 900  # 15 minutes
+    VERIFICATION_CODE_MOBILE_EXPIRE: int = 300  # 5 minutes
+    VERIFICATION_CODE_SEND_INTERVAL: int = 60  # seconds between sends
+    VERIFICATION_CODE_DAILY_LIMIT: int = 10  # max sends per day
+
+    # Alibaba Cloud SMS
+    ALIBABA_SMS_ACCESS_KEY: str = ""
+    ALIBABA_SMS_SECRET: str = ""
+    ALIBABA_SMS_SIGN_NAME: str = ""
+    ALIBABA_SMS_TEMPLATE_REGISTER: str = ""
+    ALIBABA_SMS_TEMPLATE_BIND: str = ""
+    ALIBABA_SMS_TEMPLATE_RESET: str = ""
+
+    # Tencent Cloud SMS (reserved for future)
+    TENCENT_SMS_SECRET_ID: str = ""
+    TENCENT_SMS_SECRET_KEY: str = ""
+    TENCENT_SMS_APP_ID: str = ""
+    TENCENT_SMS_SIGN_NAME: str = ""
+    TENCENT_SMS_TEMPLATE_REGISTER: str = ""
+    TENCENT_SMS_TEMPLATE_BIND: str = ""
+    TENCENT_SMS_TEMPLATE_RESET: str = ""
+
+    # Feature flags
+    FEATURE_NEW_IDENTITY_SYSTEM: bool = True  # Enable new identity/contact system
+
     # Sandbox configuration
     SANDBOX_TYPE: SandboxType = SandboxType.SUBPROCESS
     SANDBOX_API_KEY: str = ""

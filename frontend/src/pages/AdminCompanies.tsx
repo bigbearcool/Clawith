@@ -152,6 +152,36 @@ function PlatformTab({ onPlatformUrlSaved }: { onPlatformUrlSaved?: () => void }
     const [templatesSaved, setTemplatesSaved] = useState(false);
     const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
 
+    // System SMS configuration
+    const [smsConfig, setSmsConfig] = useState({
+        SMS_PROVIDER: 'alibaba',
+        ALIBABA_SMS_ACCESS_KEY: '',
+        ALIBABA_SMS_SECRET: '',
+        ALIBABA_SMS_SIGN_NAME: '',
+        ALIBABA_SMS_TEMPLATE_REGISTER: '',
+        ALIBABA_SMS_TEMPLATE_BIND: '',
+        ALIBABA_SMS_TEMPLATE_RESET: '',
+        TENCENT_SMS_SECRET_ID: '',
+        TENCENT_SMS_SECRET_KEY: '',
+        TENCENT_SMS_APP_ID: '',
+        TENCENT_SMS_SIGN_NAME: '',
+        TENCENT_SMS_TEMPLATE_REGISTER: '',
+        TENCENT_SMS_TEMPLATE_BIND: '',
+        TENCENT_SMS_TEMPLATE_RESET: '',
+        VERIFICATION_CODE_EMAIL_EXPIRE: 900,
+        VERIFICATION_CODE_MOBILE_EXPIRE: 300,
+        VERIFICATION_CODE_SEND_INTERVAL: 60,
+        VERIFICATION_CODE_DAILY_LIMIT: 10,
+    });
+    const [smsConfigSaving, setSmsConfigSaving] = useState(false);
+    const [smsConfigSaved, setSmsConfigSaved] = useState(false);
+
+    // Test SMS
+    const [showTestSms, setShowTestSms] = useState(false);
+    const [testSmsPhone, setTestSmsPhone] = useState('');
+    const [testSmsSending, setTestSmsSending] = useState(false);
+    const [testSmsResult, setTestSmsResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
     // Toast
     const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -206,6 +236,34 @@ function PlatformTab({ onPlatformUrlSaved }: { onPlatformUrlSaved?: () => void }
                 if (d.templates) setEmailTemplates(d.templates);
                 if (d.variables) setEmailTemplateVars(d.variables);
                 if (d.defaults) setEmailTemplateDefaults(d.defaults);
+            })
+            .catch(() => { });
+
+        // Load System SMS
+        fetchJson<any>('/enterprise/system-settings/system_sms_platform')
+            .then(d => {
+                if (d?.value) {
+                    setSmsConfig({
+                        SMS_PROVIDER: d.value.SMS_PROVIDER || 'alibaba',
+                        ALIBABA_SMS_ACCESS_KEY: d.value.ALIBABA_SMS_ACCESS_KEY || '',
+                        ALIBABA_SMS_SECRET: d.value.ALIBABA_SMS_SECRET || '',
+                        ALIBABA_SMS_SIGN_NAME: d.value.ALIBABA_SMS_SIGN_NAME || '',
+                        ALIBABA_SMS_TEMPLATE_REGISTER: d.value.ALIBABA_SMS_TEMPLATE_REGISTER || '',
+                        ALIBABA_SMS_TEMPLATE_BIND: d.value.ALIBABA_SMS_TEMPLATE_BIND || '',
+                        ALIBABA_SMS_TEMPLATE_RESET: d.value.ALIBABA_SMS_TEMPLATE_RESET || '',
+                        TENCENT_SMS_SECRET_ID: d.value.TENCENT_SMS_SECRET_ID || '',
+                        TENCENT_SMS_SECRET_KEY: d.value.TENCENT_SMS_SECRET_KEY || '',
+                        TENCENT_SMS_APP_ID: d.value.TENCENT_SMS_APP_ID || '',
+                        TENCENT_SMS_SIGN_NAME: d.value.TENCENT_SMS_SIGN_NAME || '',
+                        TENCENT_SMS_TEMPLATE_REGISTER: d.value.TENCENT_SMS_TEMPLATE_REGISTER || '',
+                        TENCENT_SMS_TEMPLATE_BIND: d.value.TENCENT_SMS_TEMPLATE_BIND || '',
+                        TENCENT_SMS_TEMPLATE_RESET: d.value.TENCENT_SMS_TEMPLATE_RESET || '',
+                        VERIFICATION_CODE_EMAIL_EXPIRE: d.value.VERIFICATION_CODE_EMAIL_EXPIRE || 900,
+                        VERIFICATION_CODE_MOBILE_EXPIRE: d.value.VERIFICATION_CODE_MOBILE_EXPIRE || 300,
+                        VERIFICATION_CODE_SEND_INTERVAL: d.value.VERIFICATION_CODE_SEND_INTERVAL || 60,
+                        VERIFICATION_CODE_DAILY_LIMIT: d.value.VERIFICATION_CODE_DAILY_LIMIT || 10,
+                    });
+                }
             })
             .catch(() => { });
     }, []);
@@ -290,6 +348,39 @@ function PlatformTab({ onPlatformUrlSaved }: { onPlatformUrlSaved?: () => void }
             setTestEmailResult({ ok: false, msg: e.message || 'Failed to send test email' });
         }
         setTestEmailSending(false);
+    };
+
+    const saveSmsConfig = async () => {
+        setSmsConfigSaving(true);
+        try {
+            await fetchJson('/enterprise/system-settings/system_sms_platform', {
+                method: 'PUT',
+                body: JSON.stringify({ value: smsConfig }),
+            });
+            setSmsConfigSaved(true);
+            setTimeout(() => setSmsConfigSaved(false), 2000);
+            showToast('SMS config saved');
+        } catch (e: any) {
+            showToast('Failed to save SMS config: ' + (e.message || 'Unknown error'), 'error');
+        } finally {
+            setSmsConfigSaving(false);
+        }
+    };
+
+    const handleSendTestSms = async () => {
+        if (!testSmsPhone.trim()) return;
+        setTestSmsSending(true);
+        setTestSmsResult(null);
+        try {
+            await fetchJson('/enterprise/system-sms/test', {
+                method: 'POST',
+                body: JSON.stringify({ mobile: testSmsPhone }),
+            });
+            setTestSmsResult({ ok: true, msg: t('enterprise.systemSms.testSuccess', 'Test SMS sent successfully!') });
+        } catch (e: any) {
+            setTestSmsResult({ ok: false, msg: e.message || 'Failed to send test SMS' });
+        }
+        setTestSmsSending(false);
     };
 
     const saveEmailTemplates = async () => {
@@ -705,6 +796,324 @@ function PlatformTab({ onPlatformUrlSaved }: { onPlatformUrlSaved?: () => void }
                         {templatesSaving ? t('common.loading') : t('enterprise.emailTemplates.saveTemplates', 'Save Templates')}
                     </button>
                     {templatesSaved && <span style={{ color: 'var(--success)', fontSize: '12px' }}>{t('common.saved', 'Saved')}</span>}
+                </div>
+            </div>
+
+            {/* System SMS Configuration */}
+            <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text-secondary)' }}>
+                    {t('enterprise.systemSms.title', 'System SMS Configuration')}
+                </div>
+                <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '16px' }}>
+                    {t('enterprise.systemSms.description', 'Configure SMS settings for sending verification codes. Supports Alibaba Cloud and Tencent Cloud SMS services.')}
+                </p>
+                
+                {/* Provider selection */}
+                <div style={{ marginBottom: '16px' }}>
+                    <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                        {t('enterprise.systemSms.provider', 'SMS Provider')}
+                    </label>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                        {[
+                            { key: 'alibaba', label: t('enterprise.systemSms.alibaba', 'Alibaba Cloud') },
+                            { key: 'tencent', label: t('enterprise.systemSms.tencent', 'Tencent Cloud') },
+                        ].map(p => (
+                            <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                                <input
+                                    type="radio"
+                                    name="sms_provider"
+                                    checked={smsConfig.SMS_PROVIDER === p.key}
+                                    onChange={() => setSmsConfig({ ...smsConfig, SMS_PROVIDER: p.key })}
+                                    style={{ width: '14px', height: '14px' }}
+                                />
+                                <span style={{ fontSize: '13px' }}>{p.label}</span>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Alibaba Cloud SMS fields */}
+                {smsConfig.SMS_PROVIDER === 'alibaba' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                                {t('enterprise.systemSms.accessKey', 'Access Key ID')}
+                            </label>
+                            <input
+                                className="form-input"
+                                value={smsConfig.ALIBABA_SMS_ACCESS_KEY}
+                                onChange={e => setSmsConfig({ ...smsConfig, ALIBABA_SMS_ACCESS_KEY: e.target.value })}
+                                placeholder="LTAI..."
+                                style={{ fontSize: '13px' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                                {t('enterprise.systemSms.secret', 'Access Key Secret')}
+                            </label>
+                            <input
+                                className="form-input"
+                                type="password"
+                                value={smsConfig.ALIBABA_SMS_SECRET}
+                                onChange={e => setSmsConfig({ ...smsConfig, ALIBABA_SMS_SECRET: e.target.value })}
+                                placeholder="••••••••"
+                                style={{ fontSize: '13px' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                                {t('enterprise.systemSms.signName', 'Sign Name')}
+                            </label>
+                            <input
+                                className="form-input"
+                                value={smsConfig.ALIBABA_SMS_SIGN_NAME}
+                                onChange={e => setSmsConfig({ ...smsConfig, ALIBABA_SMS_SIGN_NAME: e.target.value })}
+                                placeholder="YourBrand"
+                                style={{ fontSize: '13px' }}
+                            />
+                        </div>
+                        <div style={{ gridColumn: 'span 2' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
+                                {t('enterprise.systemSms.templatesDesc', 'SMS template codes for different scenarios:')}
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                        {t('enterprise.systemSms.templateRegister', 'Register/Login')}
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        value={smsConfig.ALIBABA_SMS_TEMPLATE_REGISTER}
+                                        onChange={e => setSmsConfig({ ...smsConfig, ALIBABA_SMS_TEMPLATE_REGISTER: e.target.value })}
+                                        placeholder="SMS_123456789"
+                                        style={{ fontSize: '12px' }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                        {t('enterprise.systemSms.templateBind', 'Bind Contact')}
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        value={smsConfig.ALIBABA_SMS_TEMPLATE_BIND}
+                                        onChange={e => setSmsConfig({ ...smsConfig, ALIBABA_SMS_TEMPLATE_BIND: e.target.value })}
+                                        placeholder="SMS_123456789"
+                                        style={{ fontSize: '12px' }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                        {t('enterprise.systemSms.templateReset', 'Password Reset')}
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        value={smsConfig.ALIBABA_SMS_TEMPLATE_RESET}
+                                        onChange={e => setSmsConfig({ ...smsConfig, ALIBABA_SMS_TEMPLATE_RESET: e.target.value })}
+                                        placeholder="SMS_123456789"
+                                        style={{ fontSize: '12px' }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Tencent Cloud SMS fields */}
+                {smsConfig.SMS_PROVIDER === 'tencent' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                                {t('enterprise.systemSms.secretId', 'Secret ID')}
+                            </label>
+                            <input
+                                className="form-input"
+                                value={smsConfig.TENCENT_SMS_SECRET_ID}
+                                onChange={e => setSmsConfig({ ...smsConfig, TENCENT_SMS_SECRET_ID: e.target.value })}
+                                placeholder="AKID..."
+                                style={{ fontSize: '13px' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                                {t('enterprise.systemSms.secretKey', 'Secret Key')}
+                            </label>
+                            <input
+                                className="form-input"
+                                type="password"
+                                value={smsConfig.TENCENT_SMS_SECRET_KEY}
+                                onChange={e => setSmsConfig({ ...smsConfig, TENCENT_SMS_SECRET_KEY: e.target.value })}
+                                placeholder="••••••••"
+                                style={{ fontSize: '13px' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                                {t('enterprise.systemSms.appId', 'SDK App ID')}
+                            </label>
+                            <input
+                                className="form-input"
+                                value={smsConfig.TENCENT_SMS_APP_ID}
+                                onChange={e => setSmsConfig({ ...smsConfig, TENCENT_SMS_APP_ID: e.target.value })}
+                                placeholder="1400..."
+                                style={{ fontSize: '13px' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '12px', marginBottom: '6px' }}>
+                                {t('enterprise.systemSms.signName', 'Sign Name')}
+                            </label>
+                            <input
+                                className="form-input"
+                                value={smsConfig.TENCENT_SMS_SIGN_NAME}
+                                onChange={e => setSmsConfig({ ...smsConfig, TENCENT_SMS_SIGN_NAME: e.target.value })}
+                                placeholder="YourBrand"
+                                style={{ fontSize: '13px' }}
+                            />
+                        </div>
+                        <div style={{ gridColumn: 'span 2' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
+                                {t('enterprise.systemSms.templatesDesc', 'SMS template codes for different scenarios:')}
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                        {t('enterprise.systemSms.templateRegister', 'Register/Login')}
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        value={smsConfig.TENCENT_SMS_TEMPLATE_REGISTER}
+                                        onChange={e => setSmsConfig({ ...smsConfig, TENCENT_SMS_TEMPLATE_REGISTER: e.target.value })}
+                                        placeholder="123456"
+                                        style={{ fontSize: '12px' }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                        {t('enterprise.systemSms.templateBind', 'Bind Contact')}
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        value={smsConfig.TENCENT_SMS_TEMPLATE_BIND}
+                                        onChange={e => setSmsConfig({ ...smsConfig, TENCENT_SMS_TEMPLATE_BIND: e.target.value })}
+                                        placeholder="123456"
+                                        style={{ fontSize: '12px' }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                        {t('enterprise.systemSms.templateReset', 'Password Reset')}
+                                    </label>
+                                    <input
+                                        className="form-input"
+                                        value={smsConfig.TENCENT_SMS_TEMPLATE_RESET}
+                                        onChange={e => setSmsConfig({ ...smsConfig, TENCENT_SMS_TEMPLATE_RESET: e.target.value })}
+                                        placeholder="123456"
+                                        style={{ fontSize: '12px' }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Verification code settings */}
+                <div style={{ marginTop: '16px', padding: '12px', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {t('enterprise.systemSms.verificationSettings', 'Verification Code Settings')}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                {t('enterprise.systemSms.emailExpire', 'Email Code Expire (s)')}
+                            </label>
+                            <input
+                                className="form-input"
+                                type="number"
+                                value={smsConfig.VERIFICATION_CODE_EMAIL_EXPIRE}
+                                onChange={e => setSmsConfig({ ...smsConfig, VERIFICATION_CODE_EMAIL_EXPIRE: parseInt(e.target.value) || 900 })}
+                                placeholder="900"
+                                style={{ fontSize: '12px' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                {t('enterprise.systemSms.mobileExpire', 'Mobile Code Expire (s)')}
+                            </label>
+                            <input
+                                className="form-input"
+                                type="number"
+                                value={smsConfig.VERIFICATION_CODE_MOBILE_EXPIRE}
+                                onChange={e => setSmsConfig({ ...smsConfig, VERIFICATION_CODE_MOBILE_EXPIRE: parseInt(e.target.value) || 300 })}
+                                placeholder="300"
+                                style={{ fontSize: '12px' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                                {t('enterprise.systemSms.sendInterval', 'Send Interval (s)')}
+                            </label>
+                            <input
+                                className="form-input"
+                                type="number"
+                                value={smsConfig.VERIFICATION_CODE_SEND_INTERVAL}
+                                onChange={e => setSmsConfig({ ...smsConfig, VERIFICATION_CODE_SEND_INTERVAL: parseInt(e.target.value) || 60 })}
+                                placeholder="60"
+                                style={{ fontSize: '12px' }}
+                            />
+                        </div>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                        <label className="form-label" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                            {t('enterprise.systemSms.dailyLimit', 'Daily Send Limit')}
+                        </label>
+                        <input
+                            className="form-input"
+                            type="number"
+                            value={smsConfig.VERIFICATION_CODE_DAILY_LIMIT}
+                            onChange={e => setSmsConfig({ ...smsConfig, VERIFICATION_CODE_DAILY_LIMIT: parseInt(e.target.value) || 10 })}
+                            placeholder="10"
+                            style={{ fontSize: '12px', width: '120px' }}
+                        />
+                    </div>
+                </div>
+
+                <div style={{ marginTop: '16px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button className="btn btn-primary" onClick={saveSmsConfig} disabled={smsConfigSaving}>
+                        {smsConfigSaving ? t('common.loading') : t('common.save', 'Save')}
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => { setShowTestSms(!showTestSms); setTestSmsResult(null); }}>
+                        {t('enterprise.systemSms.sendTest', 'Send Test SMS')}
+                    </button>
+                    {smsConfigSaved && <span style={{ color: 'var(--success)', fontSize: '12px' }}>{t('common.saved', 'Saved')}</span>}
+                </div>
+
+                {/* Test SMS inline form */}
+                {showTestSms && (
+                    <div style={{ marginTop: '12px', padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <input
+                                className="form-input"
+                                type="tel"
+                                placeholder={t('enterprise.systemSms.testPlaceholder', 'Enter mobile number...')}
+                                value={testSmsPhone}
+                                onChange={e => setTestSmsPhone(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleSendTestSms()}
+                                style={{ flex: 1, fontSize: '13px' }}
+                            />
+                            <button className="btn btn-primary btn-sm" onClick={handleSendTestSms} disabled={testSmsSending || !testSmsPhone.trim()}>
+                                {testSmsSending ? t('common.loading', 'Sending...') : t('enterprise.systemSms.send', 'Send')}
+                            </button>
+                        </div>
+                        {testSmsResult && (
+                            <div style={{ marginTop: '8px', fontSize: '12px', color: testSmsResult.ok ? 'var(--success)' : 'var(--error)' }}>
+                                {testSmsResult.msg}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                    {t('enterprise.systemSms.hint', 'For Alibaba Cloud SMS, you need to apply for a signature and templates in the SMS console first. Templates must include a ${code} placeholder for the verification code.')}
                 </div>
             </div>
         </>

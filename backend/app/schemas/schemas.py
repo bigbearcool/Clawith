@@ -161,6 +161,7 @@ class UserOut(BaseModel):
     tenant_id: uuid.UUID | None = None
     title: str | None = None
     primary_mobile: str | None = None
+    phone_verified: bool = False
     registration_source: str | None = None
     is_active: bool
     email_verified: bool = True
@@ -624,3 +625,96 @@ class GatewaySendMessageRequest(BaseModel):
     content: str = Field(min_length=1)
     channel: str | None = None  # Optional: "feishu", "agent", etc. Auto-detected if omitted.
     destinations: list[MessageDestination] | None = None  # Optional: broadcast destinations
+
+
+# ─── Verification & Contacts ─────────────────────────────
+
+
+class SendVerificationCodeRequest(BaseModel):
+    """Request to send verification code."""
+
+    contact: str = Field(description="Email or mobile number")
+    channel: str = Field(description="Channel: email or mobile")
+    purpose: str = Field(default="register", description="Purpose: register/bind/reset_password")
+
+
+class VerifyCodeRequest(BaseModel):
+    """Request to verify a code."""
+
+    contact: str = Field(description="Email or mobile number")
+    channel: str = Field(description="Channel: email or mobile")
+    purpose: str = Field(description="Purpose")
+    code: str = Field(min_length=6, max_length=6, description="6-digit verification code")
+
+
+class ContactOut(BaseModel):
+    """Contact method output."""
+
+    id: uuid.UUID
+    contact_type: str  # mobile / email
+    contact_value: str
+    purpose: str  # primary / verified / legacy
+    verified: bool
+    verified_at: datetime | None = None
+    source: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AddContactRequest(BaseModel):
+    """Request to add a contact method."""
+
+    contact_type: str = Field(description="mobile or email")
+    contact_value: str = Field(description="Contact value")
+    purpose: str = Field(default="verified", description="primary/verified/legacy")
+    verification_code: str = Field(min_length=6, max_length=6, description="Verification code")
+
+
+class SSOLoginResponse(BaseModel):
+    """SSO login response with optional binding requirement."""
+
+    status: str  # success | needs_binding
+    access_token: str | None = None
+    user: UserOut | None = None
+    sso_token: str | None = None  # For binding flow
+    suggested_mobile: str | None = None  # Masked mobile from SSO
+    suggested_email: str | None = None  # Masked email from SSO
+    message: str | None = None
+
+
+class SSOBindRequest(BaseModel):
+    """Request to bind contact for SSO login."""
+
+    sso_token: str = Field(description="Token from needs_binding response")
+    bind_type: str = Field(description="use_suggested or use_other")
+    mobile: str | None = None
+    email: str | None = None
+    verification_code: str = Field(min_length=6, max_length=6)
+
+
+class LoginResponse(BaseModel):
+    """Login response with optional tenant selection."""
+
+    status: str  # success | needs_tenant_selection
+    access_token: str | None = None
+    user: UserOut | None = None
+    tenants: list["TenantChoiceOut"] | None = None
+    temp_token: str | None = None  # For tenant selection flow
+    message: str | None = None
+
+
+class TenantChoiceOut(BaseModel):
+    """Tenant choice for multi-tenant login."""
+
+    id: uuid.UUID
+    name: str
+    logo_url: str | None = None
+    role: str
+
+
+class SelectTenantRequest(BaseModel):
+    """Request to select tenant after multi-tenant login."""
+
+    temp_token: str
+    tenant_id: uuid.UUID

@@ -56,9 +56,10 @@ class ChannelUserService:
         provider = await self._ensure_provider(db, channel_type, tenant_id)
 
         # Step 2: Try to find OrgMember by external identity
-        org_member = await self._find_org_member(
-            db, provider.id, channel_type, external_user_id
-        )
+        # For Feishu: prefer user_id (tenant-stable) if available in extra_info
+        feishu_user_id = extra_info.get("user_id") if channel_type == "feishu" else None
+
+        org_member = await self._find_org_member(db, provider.id, channel_type, external_user_id, feishu_user_id)
 
         # Step 3: Resolve User from OrgMember or other means
         user = None
@@ -67,9 +68,7 @@ class ChannelUserService:
             # Case 1: OrgMember already linked to User
             user = await db.get(User, org_member.user_id)
             if user:
-                logger.debug(
-                    f"[{channel_type}] Found user via linked OrgMember: {user.id}"
-                )
+                logger.debug(f"[{channel_type}] Found user via linked OrgMember: {user.id}")
                 return user
 
         # Step 4: Try to find User by email/mobile from extra_info
@@ -79,16 +78,12 @@ class ChannelUserService:
         if not user and email:
             user = await sso_service.match_user_by_email(db, email, tenant_id)
             if user:
-                logger.info(
-                    f"[{channel_type}] Matched user by email: {user.id}"
-                )
+                logger.info(f"[{channel_type}] Matched user by email: {user.id}")
 
         if not user and mobile:
             user = await sso_service.match_user_by_mobile(db, mobile, tenant_id)
             if user:
-                logger.info(
-                    f"[{channel_type}] Matched user by mobile: {user.id}"
-                )
+                logger.info(f"[{channel_type}] Matched user by mobile: {user.id}")
 
         # If found User by email/mobile, link OrgMember if exists (only for org-sync channels)
         if user:
@@ -100,9 +95,7 @@ class ChannelUserService:
                     # No OrgMember found by external_id. Before creating a new shell,
                     # check if this user already has an OrgMember from org sync so
                     # we reuse it instead of creating a duplicate entry.
-                    existing_member = await self._find_existing_org_member_for_user(
-                        db, user.id, provider.id, tenant_id
-                    )
+                    existing_member = await self._find_existing_org_member_for_user(db, user.id, provider.id, tenant_id)
                     if existing_member:
                         # Reuse the org-synced record: update its channel-specific IDs
                         # so future lookups by external_id work without a new shell.
@@ -118,16 +111,13 @@ class ChannelUserService:
                     else:
                         # Truly no OrgMember for this user → create shell
                         await self._create_org_member_shell(
-                            db, provider, channel_type, external_user_id, extra_info,
-                            linked_user_id=user.id
+                            db, provider, channel_type, external_user_id, extra_info, linked_user_id=user.id
                         )
             await db.flush()
             return user
 
         # Step 5: Create new User (lazy registration)
-        user = await self._create_channel_user(
-            db, channel_type, external_user_id, extra_info, tenant_id
-        )
+        user = await self._create_channel_user(db, channel_type, external_user_id, extra_info, tenant_id)
 
         # Step 6: Link or create OrgMember (only for channels with org sync)
         # Channels like Discord/Slack don't have OrgMember, skip this step
@@ -136,13 +126,10 @@ class ChannelUserService:
                 org_member.user_id = user.id
             else:
                 await self._create_org_member_shell(
-                    db, provider, channel_type, external_user_id, extra_info,
-                    linked_user_id=user.id
+                    db, provider, channel_type, external_user_id, extra_info, linked_user_id=user.id
                 )
             await db.flush()
-        logger.info(
-            f"[{channel_type}] Created new user: {user.id} for external_id: {external_user_id}"
-        )
+        logger.info(f"[{channel_type}] Created new user: {user.id} for external_id: {external_user_id}")
 
         return user
 
@@ -150,9 +137,7 @@ class ChannelUserService:
         self, db: AsyncSession, provider_type: str, tenant_id: uuid.UUID | None
     ) -> IdentityProvider:
         """Get or create IdentityProvider record."""
-        query = select(IdentityProvider).where(
-            IdentityProvider.provider_type == provider_type
-        )
+        query = select(IdentityProvider).where(IdentityProvider.provider_type == provider_type)
         if tenant_id:
             query = query.where(IdentityProvider.tenant_id == tenant_id)
 
@@ -178,33 +163,48 @@ class ChannelUserService:
         provider_id: uuid.UUID,
         channel_type: str,
         external_user_id: str,
+        feishu_user_id: str | None = None,
     ) -> OrgMember | None:
         """Find OrgMember by external identity.
 
-        For Feishu: try unionid first, then open_id, then external_id
+        For Feishu: try user_id (tenant-stable) first, then unionid, open_id, external_id
         For DingTalk: try unionid first, then external_id
         For WeCom: try external_id (userid)
+
+        Note: Includes deleted members - they may be reactivated if user sends a message.
 
         Returns None if OrgMember not found or org sync is not enabled for this channel.
         """
         try:
             # Build OR conditions for matching
-            conditions = [OrgMember.provider_id == provider_id, OrgMember.status == "active"]
+            # Note: Don't filter by status - we want to reactivate deleted members
+            from sqlalchemy import or_
+
+            conditions = [OrgMember.provider_id == provider_id]
 
             # Channel-specific matching priority
             if channel_type == "feishu":
-                # Feishu: unionid is most stable, then open_id, then user_id
+                # Feishu: user_id (tenant-stable) is most reliable
+                # user_id is stored as external_id in OrgMember from org sync
+                match_ids = [external_user_id]
+                if feishu_user_id and feishu_user_id != external_user_id:
+                    match_ids.append(feishu_user_id)
+
+                logger.info(
+                    f"[{channel_type}] Searching OrgMember with match_ids={match_ids}, provider_id={provider_id}"
+                )
+
+                # Use or_() for proper SQL generation
                 conditions.append(
-                    (OrgMember.unionid == external_user_id) |
-                    (OrgMember.open_id == external_user_id) |
-                    (OrgMember.external_id == external_user_id)
+                    or_(
+                        OrgMember.unionid.in_(match_ids),
+                        OrgMember.open_id == external_user_id,
+                        OrgMember.external_id.in_(match_ids),
+                    )
                 )
             elif channel_type == "dingtalk":
                 # DingTalk: unionid is stable across apps, then external_id
-                conditions.append(
-                    (OrgMember.unionid == external_user_id) |
-                    (OrgMember.external_id == external_user_id)
-                )
+                conditions.append((OrgMember.unionid == external_user_id) | (OrgMember.external_id == external_user_id))
             elif channel_type == "wecom":
                 # WeCom: external_id (userid) is the primary identifier
                 conditions.append(OrgMember.external_id == external_user_id)
@@ -213,12 +213,34 @@ class ChannelUserService:
                 # These channels don't have OrgMember, return None immediately
                 return None
 
-            query = select(OrgMember).where(*conditions)
+            query = select(OrgMember).where(*conditions).order_by(OrgMember.synced_at.desc())
             result = await db.execute(query)
-            return result.scalar_one_or_none()
+            members = result.scalars().all()
+
+            if not members:
+                logger.info(f"[{channel_type}] OrgMember query returned 0 results")
+                return None
+
+            # Prefer the one that already has a user_id linked
+            member = next((m for m in members if m.user_id), members[0])
+
+            logger.info(
+                f"[{channel_type}] OrgMember query returned {len(members)} results, selected: name={member.name}, user_id={member.user_id}"
+            )
+
+            # If found and deleted, reactivate it
+            if member.status == "deleted":
+                logger.info(f"[{channel_type}] Reactivating deleted OrgMember: {member.id}")
+                member.status = "active"
+                await db.flush()
+
+            return member
         except Exception as e:
             # OrgMember table may not exist or org sync not enabled
-            logger.debug(f"[{channel_type}] OrgMember lookup failed: {e}")
+            logger.error(f"[{channel_type}] OrgMember lookup failed: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
             return None
 
     async def _create_org_member_shell(
@@ -300,11 +322,8 @@ class ChannelUserService:
 
         # Ensure unique username within tenant
         from app.models.user import User, Identity
-        query = (
-            select(User)
-            .join(User.identity)
-            .where(Identity.username == username)
-        )
+
+        query = select(User).join(User.identity).where(Identity.username == username)
         if tenant_id:
             query = query.where(User.tenant_id == tenant_id)
 
@@ -316,6 +335,7 @@ class ChannelUserService:
 
         # Step 1: Find or create global Identity using unified registration service
         from app.services.registration_service import registration_service
+
         identity = await registration_service.find_or_create_identity(
             db,
             email=email,
@@ -323,7 +343,6 @@ class ChannelUserService:
             username=username,
             password=uuid.uuid4().hex,
         )
-
 
         # Step 2: Create tenant-scoped User linked to Identity
         user = User(
@@ -386,6 +405,7 @@ async def get_platform_user_by_org_member(
     # Case 3: Create new User and link to OrgMember
     # Determine channel type from provider
     from app.models.identity import IdentityProvider
+
     provider = await db.get(IdentityProvider, org_member.provider_id)
     channel_type = provider.provider_type if provider else "unknown"
 
@@ -402,11 +422,8 @@ async def get_platform_user_by_org_member(
 
     # Ensure unique username within tenant
     from app.models.user import User, Identity
-    query = (
-        select(User)
-        .join(User.identity)
-        .where(Identity.username == username)
-    )
+
+    query = select(User).join(User.identity).where(Identity.username == username)
     if agent_tenant_id:
         query = query.where(User.tenant_id == agent_tenant_id)
 
@@ -418,6 +435,7 @@ async def get_platform_user_by_org_member(
 
     # Step 3: Create new User and link to OrgMember
     from app.services.registration_service import registration_service
+
     # Use unified find_or_create_identity with dual lookup (email/phone)
     identity = await registration_service.find_or_create_identity(
         db,
@@ -426,7 +444,6 @@ async def get_platform_user_by_org_member(
         username=username,
         password=uuid.uuid4().hex,
     )
-
 
     user = User(
         identity_id=identity.id,

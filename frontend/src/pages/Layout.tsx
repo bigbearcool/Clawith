@@ -85,6 +85,7 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
     const [username, setUsername] = useState(user?.username || '');
     const [email, setEmail] = useState(user?.email || '');
     const [displayName, setDisplayName] = useState(user?.display_name || '');
+    const [mobile, setMobile] = useState(user?.primary_mobile || '');
     const [oldPassword, setOldPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -95,6 +96,10 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
     const [pendingEmail, setPendingEmail] = useState<string | null>(null);
     const [verificationCode, setVerificationCode] = useState('');
     const [verifying, setVerifying] = useState(false);
+    const [mobileCode, setMobileCode] = useState('');
+    const [mobileCountdown, setMobileCountdown] = useState(0);
+    const [sendingMobileCode, setSendingMobileCode] = useState(false);
+    const [bindingMobile, setBindingMobile] = useState(false);
 
     const showMsg = (text: string, type: 'success' | 'error' = 'success') => {
         setMsg(text); setMsgType(type); setTimeout(() => setMsg(''), 3000);
@@ -163,6 +168,56 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
             showMsg(isChinese ? '验证邮件已发送，请查收' : 'Verification email sent. Please check your inbox.');
         } catch (e: any) { showMsg(e.message || 'Failed', 'error'); }
         setResendingEmail(false);
+    };
+
+    const handleSendMobileCode = async () => {
+        if (!mobile || !/^1[3-9]\d{9}$/.test(mobile)) {
+            showMsg(isChinese ? '请输入正确的手机号' : 'Enter valid mobile number', 'error');
+            return;
+        }
+        setSendingMobileCode(true);
+        try {
+            const res = await fetch('/api/auth/send-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contact: mobile, channel: 'mobile', purpose: 'bind' }),
+            });
+            if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Failed' })); throw new Error(err.detail); }
+            showMsg(isChinese ? '验证码已发送' : 'Code sent');
+            setMobileCountdown(60);
+            const timer = setInterval(() => {
+                setMobileCountdown(prev => {
+                    if (prev <= 1) { clearInterval(timer); return 0; }
+                    return prev - 1;
+                });
+            }, 1000);
+        } catch (e: any) { showMsg(e.message || 'Failed', 'error'); }
+        setSendingMobileCode(false);
+    };
+
+    const handleBindMobile = async () => {
+        if (!mobileCode || mobileCode.length !== 6) {
+            showMsg(isChinese ? '请输入6位验证码' : 'Enter 6-digit code', 'error');
+            return;
+        }
+        setBindingMobile(true);
+        try {
+            const res = await fetch('/api/auth/verify-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contact: mobile, channel: 'mobile', purpose: 'bind', code: mobileCode }),
+            });
+            if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Failed' })); throw new Error(err.detail); }
+            // Refresh user to get updated mobile
+            const token = localStorage.getItem('token');
+            const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+            if (meRes.ok) {
+                setUser(await meRes.json());
+            }
+            showMsg(isChinese ? '手机号已绑定' : 'Mobile bound');
+            setMobileCode('');
+        } catch (e: any) { showMsg(e.message || 'Failed', 'error'); }
+        setBindingMobile(false);
     };
 
     const handleChangePassword = async () => {
@@ -274,7 +329,68 @@ function AccountSettingsModal({ user, onClose, isChinese }: { user: any; onClose
                         </div>
                     </>
                 )}
+                {/* Mobile Binding */}
                 <div style={{ borderTop: '1px solid var(--border-subtle)', marginBottom: '20px' }} />
+                <h4 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {isChinese ? '手机号' : 'Mobile'}
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                    <div>
+                        <label style={labelStyle}>{isChinese ? '手机号码' : 'Mobile Number'}</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                                className="form-input"
+                                type="tel"
+                                value={mobile}
+                                onChange={e => setMobile(e.target.value.replace(/[^\d+]/g, ''))}
+                                placeholder={isChinese ? '+86 或 11位手机号' : '+86 or 11-digit number'}
+                                style={inputStyle}
+                                disabled={user?.phone_verified}
+                            />
+                            {user?.phone_verified ? (
+                                <span style={{ color: '#16a34a', fontSize: '12px', whiteSpace: 'nowrap' }}>✓ {isChinese ? '已验证' : 'Verified'}</span>
+                            ) : (
+                                <button
+                                    onClick={handleSendMobileCode}
+                                    disabled={sendingMobileCode || mobileCountdown > 0}
+                                    style={{
+                                        fontSize: '11px',
+                                        padding: '4px 8px',
+                                        borderRadius: '4px',
+                                        border: '1px solid var(--border-subtle)',
+                                        background: 'var(--bg-secondary)',
+                                        color: 'var(--text-secondary)',
+                                        cursor: (sendingMobileCode || mobileCountdown > 0) ? 'not-allowed' : 'pointer',
+                                        whiteSpace: 'nowrap',
+                                    }}
+                                >
+                                    {mobileCountdown > 0 ? `${mobileCountdown}s` : (sendingMobileCode ? '...' : (isChinese ? '发送验证码' : 'Send Code'))}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                    {!user?.phone_verified && mobile && (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <input
+                                className="form-input"
+                                type="text"
+                                value={mobileCode}
+                                onChange={e => setMobileCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                                placeholder={isChinese ? '6位验证码' : '6-digit code'}
+                                style={{ ...inputStyle, letterSpacing: '4px', textAlign: 'center' }}
+                                maxLength={6}
+                            />
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleBindMobile}
+                                disabled={bindingMobile || mobileCode.length !== 6}
+                                style={{ padding: '6px 16px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                            >
+                                {bindingMobile ? '...' : (isChinese ? '绑定' : 'Bind')}
+                            </button>
+                        </div>
+                    )}
+                </div>
                 {/* Password */}
                 <h4 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
                     {user?.has_password ? (isChinese ? '修改密码' : 'Change Password') : (isChinese ? '设置密码' : 'Set Password')}
